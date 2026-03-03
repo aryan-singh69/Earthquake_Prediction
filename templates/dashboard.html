@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h2 class="text-white fw-bold">Model Dashboard</h2>
+        <p class="text-light">Overview of training distributions and model architecture.</p>
+    </div>
+</div>
+
+<div class="row g-4 mb-5">
+    <!-- 2x2 Grid -->
+    <div class="col-md-6">
+        <div class="card bg-card border-custom h-100">
+            <div class="card-body">
+                <h5 class="card-title text-cyan mb-3">Magnitude Distribution</h5>
+                <img src="/notebooks/magnitude_distribution.png" class="img-fluid rounded" alt="Magnitude Distribution">
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card bg-card border-custom h-100">
+            <div class="card-body">
+                <h5 class="card-title text-cyan mb-3">Depth Distribution</h5>
+                <img src="/notebooks/depth_distribution.png" class="img-fluid rounded" alt="Depth Distribution">
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card bg-card border-custom h-100">
+            <div class="card-body">
+                <h5 class="card-title text-cyan mb-3">Distance Distribution</h5>
+                <img src="/notebooks/distance_distribution.png" class="img-fluid rounded" alt="Distance Distribution">
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card bg-card border-custom h-100">
+            <div class="card-body">
+                <h5 class="card-title text-cyan mb-3">Class Distribution</h5>
+                <img src="/notebooks/class_distribution.png" class="img-fluid rounded" alt="Class Distribution">
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card bg-card border-custom">
+            <div class="card-body">
+                <h4 class="card-title text-white mb-4">Model Info</h4>
+                <div class="row text-light">
+                    <div class="col-md-3 mb-3">
+                        <h6 class="text-cyan">Architecture</h6>
+                        <p class="mb-0 fw-bold text-white">MultiTask CNN</p>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <h6 class="text-cyan">Tasks</h6>
+                        <p class="mb-0 fw-bold text-white">Detection, Phase Picking, Magnitude, Location</p>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <h6 class="text-cyan">Dataset</h6>
+                        <p class="mb-0 fw-bold text-white">STEAD 470K balanced samples</p>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <h6 class="text-cyan">Val Accuracy</h6>
+                        <p class="mb-0 fw-bold text-success">97%+</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

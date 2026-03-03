@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row align-items-center mb-5 hero-section py-5">
+    <div class="col-12 text-center">
+        <h1 class="display-4 fw-bold text-white mb-3">STEAD Seismic Signal Classification</h1>
+        <p class="lead text-light mb-4 text-secondary">Advanced machine learning for earthquake detection, phase
+            picking, and source estimation.</p>
+        <a href="/upload" class="btn btn-cyan btn-lg px-5 rounded-pill">Try the Model</a>
+    </div>
+</div>
+
+<div class="row g-4 mb-5 text-center">
+    <div class="col-md-4">
+        <div class="card stat-card bg-card border-custom h-100">
+            <div class="card-body py-4">
+                <h2 class="display-5 fw-bold text-cyan mb-2">1.2M</h2>
+                <h5 class="text-white">Total Waveforms</h5>
+                <button class="btn btn-outline-cyan btn-sm mt-3 toggle-btn" onclick="toggleDetails('stat1')">Show
+                    Details</button>
+                <div id="stat1" class="stat-details mt-3 text-start small">
+                    <p class="mb-0 text-light">Extracted from global stations ensuring diverse representation.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card stat-card bg-card border-custom h-100">
+            <div class="card-body py-4">
+                <h2 class="display-5 fw-bold text-red mb-2">450K</h2>
+                <h5 class="text-white">Earthquake Events</h5>
+                <button class="btn btn-outline-cyan btn-sm mt-3 toggle-btn" onclick="toggleDetails('stat2')">Show
+                    Details</button>
+                <div id="stat2" class="stat-details mt-3 text-start small">
+                    <p class="mb-0 text-light">Manually picked high-quality P and S arrivals.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card stat-card bg-card border-custom h-100">
+            <div class="card-body py-4">
+                <h2 class="display-5 fw-bold text-blue mb-2">100K</h2>
+                <h5 class="text-white">Noise Samples</h5>
+                <button class="btn btn-outline-cyan btn-sm mt-3 toggle-btn" onclick="toggleDetails('stat3')">Show
+                    Details</button>
+                <div id="stat3" class="stat-details mt-3 text-start small">
+                    <p class="mb-0 text-light">Ambient noise from varying stations to balance training.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-md-6">
+        <div class="card bg-card border-custom h-100">
+            <div class="card-body">
+                <h3 class="card-title text-cyan mb-3">About Project</h3>
+                <p class="text-light">This project utilizes the Stanford Earthquake Dataset (STEAD) to build a
+                    multi-task deep neural network capable of processing raw 3-component seismic waveforms.</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card bg-card border-custom h-100">
+            <div class="card-body">
+                <h3 class="card-title text-cyan mb-3">Capabilities</h3>
+                <ul class="text-light list-unstyled mb-0">
+                    <li class="mb-2"><span class="text-cyan me-2">✓</span> Binary classification</li>
+                    <li class="mb-2"><span class="text-cyan me-2">✓</span> P/S wave arrival detection</li>
+                    <li class="mb-2"><span class="text-cyan me-2">✓</span> Magnitude estimation</li>
+                    <li><span class="text-cyan me-2">✓</span> Location estimation (Lat, Lon, Depth)</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environments
+venv/
+.env
+.env.*
+
+# VS Code
+.vscode/
+
+# Model Weights
+*.pth
+*.pt
+*.ckpt
+
+# Large Datasets
+*.npy
+*.hdf5
+*.hdf
+*.h5
+data/
+merge.csv
+merge.hdf5
+
+# User Uploads
+uploads/
+
+# Logs
+*.log
+
+# OS Files
+.DS_Store
+Thumbs.db

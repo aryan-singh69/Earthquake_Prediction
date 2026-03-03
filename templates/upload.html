@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <!-- Left Column: Upload Form -->
+    <div class="col-lg-4 mb-4">
+        <div class="card bg-card border-custom mb-4">
+            <div class="card-body">
+                <h4 class="card-title text-white mb-4">Upload Seismic Data</h4>
+                <form id="uploadForm">
+                    <div class="mb-3">
+                        <label class="form-label text-light">Select File (.npy, .csv, .hdf5, .h5)</label>
+                        <input type="file" class="form-control bg-dark text-white border-secondary" id="fileInput"
+                            accept=".npy,.csv,.hdf5,.h5" required>
+                    </div>
+                    <div class="mb-4">
+                        <span class="badge" id="fileTypeBadge" style="background:#444; color:#fff;">No File</span>
+                    </div>
+                    <button type="submit" class="btn btn-cyan w-100 py-2" id="predictBtn">Predict</button>
+                </form>
+
+                <hr class="border-secondary my-4">
+
+                <h5 class="text-white mb-3">Try specific samples</h5>
+                <div class="d-grid gap-2">
+                    <button class="btn btn-outline-cyan" onclick="loadSample('earthquake')">Try Earthquake
+                        Sample</button>
+                    <button class="btn btn-outline-danger" onclick="loadSample('noise')">Try Noise Sample</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Result Cards (Initially Hidden) -->
+        <div id="resultsContainer" style="display: none;">
+            <!-- Card 1: Classification -->
+            <div class="card bg-card border-custom result-card mb-3 glowing-border" id="cardClass">
+                <div class="card-body">
+                    <h6 class="text-light mb-1">Classification</h6>
+                    <h3 id="resClassText" class="mb-0"></h3>
+                    <span class="badge bg-secondary mt-2" id="resConfidence"></span>
+                </div>
+            </div>
+
+            <!-- Card 2: Phase Picking -->
+            <div class="card bg-card border-custom result-card mb-3 glowing-border" id="cardPhase">
+                <div class="card-body">
+                    <h6 class="text-light mb-2">Phase Picking</h6>
+                    <p class="mb-1 text-white">P-wave: <span id="resPWave" class="fw-bold text-cyan"></span></p>
+                    <p class="mb-1 text-white">S-wave: <span id="resSWave" class="fw-bold text-red"></span></p>
+                    <p class="mb-0 text-white small text-muted">PS gap: <span id="resPSGap"></span></p>
+                </div>
+            </div>
+
+            <!-- Card 3: Magnitude -->
+            <div class="card bg-card border-custom result-card mb-3 glowing-border" id="cardMag">
+                <div class="card-body">
+                    <h6 class="text-light mb-2">Magnitude</h6>
+                    <div class="d-flex align-items-center mb-2">
+                        <h3 id="resMagVal" class="mb-0 me-2 text-white"></h3>
+                        <span id="resMagLabel" class="badge"></span>
+                    </div>
+                    <div class="progress bg-dark" style="height: 6px;">
+                        <div id="resMagBar" class="progress-bar magnitude-bar" role="progressbar"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Card 4: Location -->
+            <div class="card bg-card border-custom result-card mb-3 glowing-border" id="cardLoc">
+                <div class="card-body">
+                    <h6 class="text-light mb-2">Location</h6>
+                    <div class="row text-white small">
+                        <div class="col-4">Lat: <br><span id="resLat" class="fw-bold"></span></div>
+                        <div class="col-4">Lon: <br><span id="resLon" class="fw-bold"></span></div>
+                        <div class="col-4">Depth:<br><span id="resDepth" class="fw-bold"></span> km</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Card 5: Interactive Map -->
+            <div class="card bg-card border-custom result-card mb-3 glowing-border" id="cardMap">
+                <div class="card-body p-2">
+                    <div id="mapContainer"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Column: Live Waveform -->
+    <div class="col-lg-8">
+        <div class="card bg-card border-custom h-100">
+            <div class="card-header border-secondary d-flex justify-content-between align-items-center py-3">
+                <h5 class="mb-0 text-white" id="plotTitle">Live Waveform</h5>
+                <span class="badge bg-success" id="liveBadge" style="display:none;">Live</span>
+            </div>
+            <div class="card-body d-flex align-items-center justify-content-center flex-column" id="plotContainer"
+                style="min-height: 450px;">
+                <div id="plotPlaceholderText" class="text-muted">Upload a file or select a sample to view waveform.
+                </div>
+                <div id="waveform-plot" style="width:100%; min-height:450px; display:none;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
