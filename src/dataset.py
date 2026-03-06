@@ -43,8 +43,12 @@ class STEADDataset(Dataset):
             print("Preload complete!")
 
     def _open_h5(self):
+        """Har worker ka apna HDF5 handle hoga — parallel safe"""
         if self.h5_file_handle is None:
-            self.h5_file_handle = h5py.File(self.hdf5_file, 'r')
+            self.h5_file_handle = h5py.File(
+                self.hdf5_file, 'r',
+                swmr=True  # ← Multiple workers parallel read kar sakte hain
+            )
 
     def __len__(self):
         return len(self.metadata)
@@ -63,7 +67,7 @@ class STEADDataset(Dataset):
         data     = data.T  # (6000,3) → (3,6000)
         features = torch.tensor(data, dtype=torch.float32)
 
-        # Detection only 
+        # Detection only
         if self.task == "detection":
             return {
                 'features':   features,
@@ -71,7 +75,7 @@ class STEADDataset(Dataset):
                 'trace_name': trace_name
             }
 
-        # Phase Picking only 
+        # Phase Picking only
         elif self.task == "picking":
             return {
                 'features':   features,
@@ -80,7 +84,7 @@ class STEADDataset(Dataset):
                 'trace_name': trace_name
             }
 
-        # Multi-Task 
+        # Multi-Task
         elif self.task == "multitask":
             return {
                 'features':   features,
@@ -96,6 +100,7 @@ class STEADDataset(Dataset):
 
         else:
             raise ValueError(f"Unknown task: {self.task}. Use 'detection', 'picking', or 'multitask'")
+
 
 if __name__ == "__main__":
     import os
@@ -119,4 +124,4 @@ if __name__ == "__main__":
     print(f"  Latitude:  {s2['latitude']}")
     print(f"  Longitude: {s2['longitude']}")
     print(f"  Depth:     {s2['depth']}")
-    print("Done! ")
+    print("Done!")

@@ -28,6 +28,13 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(SAMPLE_FOLDER, exist_ok=True)
 os.makedirs('notebooks',   exist_ok=True)
 
+# ── Normalization constants — train.py se same ────────────────
+P_S_MAX   = 6000.0
+MAG_MAX   = 9.0
+LAT_MAX   = 90.0
+LON_MAX   = 180.0
+DEPTH_MAX = 700.0
+
 # ── Model Load ────────────────────────────────────────────────
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
@@ -49,10 +56,6 @@ def normalize_shape(data):
 
 # ── Helper — Real Prediction ──────────────────────────────────
 def run_prediction(data):
-    """
-    data: numpy (6000, 3)
-    returns: dict with all predictions
-    """
     tensor = torch.tensor(data.T, dtype=torch.float32).unsqueeze(0).to(device)
 
     with torch.no_grad():
@@ -63,32 +66,34 @@ def run_prediction(data):
     prediction = "Earthquake" if prob >= 0.5 else "Noise"
     confidence = round(prob * 100, 2) if prob >= 0.5 else round((1 - prob) * 100, 2)
 
-    # Phase picking (samples)
+    # Phase — denormalize
     phase    = outputs['phase'].squeeze().cpu().numpy()
-    p_sample = float(phase[0])
-    s_sample = float(phase[1])
-    p_sec    = round(p_sample / 100, 2)  # 100Hz sampling rate
+    p_sample = float(phase[0]) * P_S_MAX
+    s_sample = float(phase[1]) * P_S_MAX
+    p_sec    = round(p_sample / 100, 2)   # 100Hz
     s_sec    = round(s_sample / 100, 2)
 
-    # Magnitude
-    magnitude = round(float(outputs['magnitude'].squeeze().cpu().numpy()), 2)
+    # Magnitude — denormalize
+    magnitude = round(float(outputs['magnitude'].squeeze().cpu().numpy()) * MAG_MAX, 2)
+    magnitude = max(0.0, min(9.0, magnitude))  # clamp 0-9
 
-    # Location
+    # Location — denormalize
     location  = outputs['location'].squeeze().cpu().numpy()
-    latitude  = round(float(location[0]), 4)
-    longitude = round(float(location[1]), 4)
-    depth     = round(float(location[2]), 2)
+    latitude  = round(float(location[0]) * LAT_MAX,   4)
+    longitude = round(float(location[1]) * LON_MAX,   4)
+    depth     = round(float(location[2]) * DEPTH_MAX, 2)
 
-    # Noise hone pe phase/location None karo
+    # Clamp to valid ranges
+    latitude  = max(-90.0,  min(90.0,  latitude))
+    longitude = max(-180.0, min(180.0, longitude))
+    depth     = max(0.0,    min(700.0, depth))
+
+    print(f"  Raw phase: {phase}")
+    print(f"  P: {p_sec}s | S: {s_sec}s | Mag: {magnitude} | Lat: {latitude} | Lon: {longitude} | Depth: {depth}km")
+
+    # Noise hone pe None karo
     if prediction == "Noise":
-        p_sample  = None
-        s_sample  = None
-        p_sec     = None
-        s_sec     = None
-        magnitude = None
-        latitude  = None
-        longitude = None
-        depth     = None
+        p_sec = s_sec = magnitude = latitude = longitude = depth = None
 
     return {
         "prediction": prediction,
