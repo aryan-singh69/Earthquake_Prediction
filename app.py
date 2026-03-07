@@ -13,39 +13,54 @@ tempfile.tempdir = 'D:\\Earthquake_Prediction\\uploads'
 
 # Model import
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
-from models import MultiTaskCNN
+from models import MultiTaskCNN  # SimpleCNN hata diya — MultiTaskCNN hi use hoga
 
 app = Flask(__name__)
 
-UPLOAD_FOLDER = 'D:\\Earthquake_Prediction\\uploads'
-SAMPLE_FOLDER = 'D:\\Earthquake_Prediction\\samples'
-MODEL_PATH    = 'D:\\Earthquake_Prediction\\models\\multitask_model.pth'
+UPLOAD_FOLDER        = 'D:\\Earthquake_Prediction\\uploads'
+SAMPLE_FOLDER        = 'D:\\Earthquake_Prediction\\samples'
+MULTITASK_MODEL_PATH = 'D:\\Earthquake_Prediction\\models\\multitask_model.pth'
 
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['UPLOAD_FOLDER']      = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(SAMPLE_FOLDER, exist_ok=True)
 os.makedirs('notebooks',   exist_ok=True)
 
-# ── Normalization constants — train.py se same ────────────────
+# Normalization constants — train.py se same
 P_S_MAX   = 6000.0
 MAG_MAX   = 9.0
 LAT_MAX   = 90.0
 LON_MAX   = 180.0
 DEPTH_MAX = 700.0
 
-# ── Model Load ────────────────────────────────────────────────
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
 
-model = MultiTaskCNN().to(device)
-model.load_state_dict(torch.load(MODEL_PATH, map_location=device, weights_only=True))
-model.eval()
-print("✅ MultiTask Model loaded!")
+# Single Model — MultiTaskCNN (Detection + Phase + Mag + Loc)
+multitask_model = MultiTaskCNN().to(device)
 
-# ── Helper — Shape Normalize ──────────────────────────────────
-def normalize_shape(data):
+if os.path.exists(MULTITASK_MODEL_PATH):
+    multitask_model.load_state_dict(
+        torch.load(MULTITASK_MODEL_PATH, map_location=device, weights_only=True)
+    )
+    print("✅ MultiTask Model (multitask_model.pth) loaded!")
+else:
+    print("⚠️  multitask_model.pth nahi mila — untrained model use ho raha hai!")
+
+multitask_model.eval()
+
+
+def normalize_waveform(data: np.ndarray) -> np.ndarray:
+    """Per-channel zero-mean, unit-std normalization. data shape: (3, 6000)"""
+    mean = data.mean(axis=1, keepdims=True)
+    std  = data.std(axis=1,  keepdims=True) + 1e-8
+    return (data - mean) / std
+
+
+def normalize_shape(data: np.ndarray) -> np.ndarray:
+    """Any input shape → (6000, 3)"""
     if data.ndim == 1:
         data = np.stack([data, data, data], axis=1)
     if data.shape == (3, 6000):
@@ -54,44 +69,43 @@ def normalize_shape(data):
         data = data.T
     return data  # (6000, 3)
 
-# ── Helper — Real Prediction ──────────────────────────────────
-def run_prediction(data):
-    tensor = torch.tensor(data.T, dtype=torch.float32).unsqueeze(0).to(device)
+
+def run_prediction(data: np.ndarray) -> dict:
+    """data: numpy (6000, 3) → predict sab kuch"""
+    waveform = data.T                        # (3, 6000)
+    waveform = normalize_waveform(waveform)  # normalize — zaroori hai
+    tensor   = torch.tensor(waveform, dtype=torch.float32).unsqueeze(0).to(device)
 
     with torch.no_grad():
-        outputs = model(tensor)
+        outputs = multitask_model(tensor)
 
     # Detection
     prob       = torch.sigmoid(outputs['detection']).item()
     prediction = "Earthquake" if prob >= 0.5 else "Noise"
     confidence = round(prob * 100, 2) if prob >= 0.5 else round((1 - prob) * 100, 2)
 
-    # Phase — denormalize
+    # Phase picking — denormalize
     phase    = outputs['phase'].squeeze().cpu().numpy()
     p_sample = float(phase[0]) * P_S_MAX
     s_sample = float(phase[1]) * P_S_MAX
-    p_sec    = round(p_sample / 100, 2)   # 100Hz
+    p_sec    = round(p_sample / 100, 2)
     s_sec    = round(s_sample / 100, 2)
 
     # Magnitude — denormalize
-    magnitude = round(float(outputs['magnitude'].squeeze().cpu().numpy()) * MAG_MAX, 2)
-    magnitude = max(0.0, min(9.0, magnitude))  # clamp 0-9
+    magnitude = float(outputs['magnitude'].squeeze().cpu().numpy()) * MAG_MAX
+    magnitude = round(max(0.0, min(9.0, magnitude)), 2)
 
     # Location — denormalize
-    location  = outputs['location'].squeeze().cpu().numpy()
-    latitude  = round(float(location[0]) * LAT_MAX,   4)
-    longitude = round(float(location[1]) * LON_MAX,   4)
-    depth     = round(float(location[2]) * DEPTH_MAX, 2)
+    loc       = outputs['location'].squeeze().cpu().numpy()
+    latitude  = round(max(-90.0,  min(90.0,  float(loc[0]) * LAT_MAX)),   4)
+    longitude = round(max(-180.0, min(180.0, float(loc[1]) * LON_MAX)),   4)
+    depth     = round(max(0.0,    min(700.0, float(loc[2]) * DEPTH_MAX)), 2)
 
-    # Clamp to valid ranges
-    latitude  = max(-90.0,  min(90.0,  latitude))
-    longitude = max(-180.0, min(180.0, longitude))
-    depth     = max(0.0,    min(700.0, depth))
+    print(f"  [MultiTaskCNN] {prediction} ({confidence}%) | "
+          f"P:{p_sec}s S:{s_sec}s | Mag:{magnitude} | "
+          f"Lat:{latitude} Lon:{longitude} Depth:{depth}km")
 
-    print(f"  Raw phase: {phase}")
-    print(f"  P: {p_sec}s | S: {s_sec}s | Mag: {magnitude} | Lat: {latitude} | Lon: {longitude} | Depth: {depth}km")
-
-    # Noise hone pe None karo
+    # Noise hone pe phase/mag/loc None karo
     if prediction == "Noise":
         p_sec = s_sec = magnitude = latitude = longitude = depth = None
 
@@ -106,7 +120,8 @@ def run_prediction(data):
         "depth":      depth
     }
 
-# ── Routes ────────────────────────────────────────────────────
+
+# Routes
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -136,27 +151,18 @@ def predict():
     try:
         if fname.endswith('.npy'):
             data = np.load(filepath, allow_pickle=True)
-            print(f"NPY loaded, shape: {data.shape}")
-
         elif fname.endswith('.csv'):
             data = pd.read_csv(filepath, header=None).values
-            print(f"CSV loaded, shape: {data.shape}")
-
         elif fname.endswith('.hdf5') or fname.endswith('.h5'):
-            print("Loading HDF5 first trace...")
             with h5py.File(filepath, 'r') as f:
                 first_key = list(f['data'].keys())[0]
                 data      = f['data'][first_key][()]
-            print(f"HDF5 loaded, shape: {data.shape}")
-
         else:
-            return jsonify({"status": "error", "message": "Unsupported format"}), 400
+            return jsonify({"status": "error", "message": "Unsupported format. Use .npy, .csv, .hdf5"}), 400
 
-        data = normalize_shape(data)
-        print(f"Final shape: {data.shape}")
-
+        print(f"Loaded shape: {data.shape}")
+        data   = normalize_shape(data)
         result = run_prediction(data)
-        print(f"Prediction: {result['prediction']} ({result['confidence']}%)")
 
         return jsonify({
             "status":    "success",
@@ -183,13 +189,9 @@ def load_sample(sample_type):
         if not files:
             return jsonify({"status": "error", "message": f"No sample found: {sample_type}"}), 404
 
-        filepath = os.path.join(SAMPLE_FOLDER, files[0])
-        data     = np.load(filepath, allow_pickle=True)
-        print(f"Sample: {files[0]}, shape: {data.shape}")
-
+        data   = np.load(os.path.join(SAMPLE_FOLDER, files[0]), allow_pickle=True)
         data   = normalize_shape(data)
         result = run_prediction(data)
-        print(f"Sample Prediction: {result['prediction']} ({result['confidence']}%)")
 
         return jsonify({
             "status":    "success",
@@ -199,7 +201,6 @@ def load_sample(sample_type):
         })
 
     except Exception as e:
-        print(f"Sample error: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 

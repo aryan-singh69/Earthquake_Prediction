@@ -4,6 +4,7 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset
 
+
 class STEADDataset(Dataset):
     def __init__(self, csv_file, hdf5_file, task="detection", transform=None,
                  preload_indices=None, dataframe=None):
@@ -25,18 +26,19 @@ class STEADDataset(Dataset):
         self.metadata['label'] = (self.metadata['trace_category'] != 'noise').astype(int)
 
         # NaN values fill karo
-        self.metadata['p_arrival_sample']  = self.metadata['p_arrival_sample'].fillna(-1.0)
-        self.metadata['s_arrival_sample']  = self.metadata['s_arrival_sample'].fillna(-1.0)
-        self.metadata['source_magnitude']  = self.metadata['source_magnitude'].fillna(0.0)
-        self.metadata['source_latitude']   = self.metadata['source_latitude'].fillna(0.0)
-        self.metadata['source_longitude']  = self.metadata['source_longitude'].fillna(0.0)
-        self.metadata['source_depth_km']   = self.metadata['source_depth_km'].fillna(0.0)
+        # p/s arrival: -1 = missing (noise samples mein hoga)
+        self.metadata['p_arrival_sample'] = self.metadata['p_arrival_sample'].fillna(-1.0)
+        self.metadata['s_arrival_sample'] = self.metadata['s_arrival_sample'].fillna(-1.0)
+        self.metadata['source_magnitude'] = self.metadata['source_magnitude'].fillna(0.0)
+        self.metadata['source_latitude']  = self.metadata['source_latitude'].fillna(0.0)
+        self.metadata['source_longitude'] = self.metadata['source_longitude'].fillna(0.0)
+        self.metadata['source_depth_km']  = self.metadata['source_depth_km'].fillna(0.0)
 
         if preload_indices is not None:
             print(f"Preloading {len(preload_indices)} samples into RAM...")
             with h5py.File(hdf5_file, 'r') as f:
                 for i, idx in enumerate(preload_indices):
-                    trace_name = self.metadata.iloc[idx]['trace_name']
+                    trace_name      = self.metadata.iloc[idx]['trace_name']
                     self.cache[idx] = f['data'][trace_name][()]
                     if i % 10000 == 0:
                         print(f"  {i}/{len(preload_indices)} loaded...")
@@ -47,8 +49,20 @@ class STEADDataset(Dataset):
         if self.h5_file_handle is None:
             self.h5_file_handle = h5py.File(
                 self.hdf5_file, 'r',
-                swmr=True  # ← Multiple workers parallel read kar sakte hain
+                swmr=True
             )
+
+    @staticmethod
+    def normalize_waveform(data: np.ndarray) -> np.ndarray:
+        """
+        Per-channel zero-mean, unit-std normalization.
+        data shape: (3, 6000)
+        Yeh zaroori hai — raw seismic amplitudes bahut badi hoti hain
+        jo loss explode karti hain.
+        """
+        mean = data.mean(axis=1, keepdims=True)         # (3, 1)
+        std  = data.std(axis=1,  keepdims=True) + 1e-8  # (3, 1) — div-by-zero se bachao
+        return (data - mean) / std
 
     def __len__(self):
         return len(self.metadata)
@@ -57,25 +71,26 @@ class STEADDataset(Dataset):
         row        = self.metadata.iloc[idx]
         trace_name = row['trace_name']
 
-        # Data load karo
+        # ── Waveform load karo ────────────────────────────────
         if idx in self.cache:
             data = self.cache[idx]
         else:
             self._open_h5()
             data = self.h5_file_handle['data'][trace_name][()]
 
-        data     = data.T  # (6000,3) → (3,6000)
+        data     = data.T                          # (6000, 3) → (3, 6000)
+        data     = self.normalize_waveform(data)   # ✅ normalize — loss fix
         features = torch.tensor(data, dtype=torch.float32)
 
-        # Detection only
+        # ── Detection only ────────────────────────────────────
         if self.task == "detection":
             return {
                 'features':   features,
-                'label':      torch.tensor(row['label'],      dtype=torch.float32),
+                'label':      torch.tensor(row['label'], dtype=torch.float32),
                 'trace_name': trace_name
             }
 
-        # Phase Picking only
+        # ── Phase Picking only ────────────────────────────────
         elif self.task == "picking":
             return {
                 'features':   features,
@@ -84,17 +99,17 @@ class STEADDataset(Dataset):
                 'trace_name': trace_name
             }
 
-        # Multi-Task
+        # ── Multi-Task ────────────────────────────────────────
         elif self.task == "multitask":
             return {
                 'features':   features,
-                'label':      torch.tensor(row['label'],             dtype=torch.float32),
-                'p_arrival':  torch.tensor(row['p_arrival_sample'],  dtype=torch.float32),
-                's_arrival':  torch.tensor(row['s_arrival_sample'],  dtype=torch.float32),
-                'magnitude':  torch.tensor(row['source_magnitude'],  dtype=torch.float32),
-                'latitude':   torch.tensor(row['source_latitude'],   dtype=torch.float32),
-                'longitude':  torch.tensor(row['source_longitude'],  dtype=torch.float32),
-                'depth':      torch.tensor(row['source_depth_km'],   dtype=torch.float32),
+                'label':      torch.tensor(row['label'],            dtype=torch.float32),
+                'p_arrival':  torch.tensor(row['p_arrival_sample'], dtype=torch.float32),
+                's_arrival':  torch.tensor(row['s_arrival_sample'], dtype=torch.float32),
+                'magnitude':  torch.tensor(row['source_magnitude'], dtype=torch.float32),
+                'latitude':   torch.tensor(row['source_latitude'],  dtype=torch.float32),
+                'longitude':  torch.tensor(row['source_longitude'], dtype=torch.float32),
+                'depth':      torch.tensor(row['source_depth_km'],  dtype=torch.float32),
                 'trace_name': trace_name
             }
 
@@ -112,6 +127,7 @@ if __name__ == "__main__":
     ds = STEADDataset(csv_file=csv_path, hdf5_file=hdf5_path, task="detection")
     s  = ds[0]
     print(f"  Features: {s['features'].shape} | Label: {s['label']}")
+    print(f"  Features min/max: {s['features'].min():.4f} / {s['features'].max():.4f}")
 
     print("\nTesting multitask mode...")
     ds2 = STEADDataset(csv_file=csv_path, hdf5_file=hdf5_path, task="multitask")

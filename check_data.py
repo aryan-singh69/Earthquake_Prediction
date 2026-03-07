@@ -16,3 +16,4 @@ first_trace = list(h5[first_group].keys())[0]
 print("First trace shape:", h5[first_group][first_trace][()].shape)
 h5.close()
 
+
