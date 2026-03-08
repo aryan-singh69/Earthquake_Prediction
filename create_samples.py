@@ -40,8 +40,8 @@ def save_samples(category, prefix, num_samples=5):
     print(f"  Total saved: {saved}/{num_samples}")
 
 # 5-5 real samples save karo
-save_samples('earthquake_local', 'earthquake_local', num_samples=5)
-save_samples('noise', 'noise', num_samples=5)
+save_samples('earthquake_local', 'earthquake_local', num_samples=10)
+save_samples('noise', 'noise', num_samples=10)
 
 h5.close()
 print("\nDone! Samples saved in samples/ folder")

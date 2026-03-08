@@ -45,9 +45,9 @@ if os.path.exists(MULTITASK_MODEL_PATH):
     multitask_model.load_state_dict(
         torch.load(MULTITASK_MODEL_PATH, map_location=device, weights_only=True)
     )
-    print("✅ MultiTask Model (multitask_model.pth) loaded!")
+    print(" MultiTask Model (multitask_model.pth) loaded!")
 else:
-    print("⚠️  multitask_model.pth nahi mila — untrained model use ho raha hai!")
+    print(" multitask_model.pth nahi mila — untrained model use ho raha hai!")
 
 multitask_model.eval()
 
