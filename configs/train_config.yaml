@@ -1,0 +1,39 @@
+# ── Training Configuration ─────────────────────────────────────
+# All paths are relative to the project root directory.
+
+data:
+  csv_path: "merge.csv"
+  hdf5_path: "merge.hdf5"
+
+training:
+  batch_size: 512
+  epochs: 20
+  learning_rate: 0.001
+  encoder_lr: 0.0001          # Differential LR for pretrained encoder layers
+  train_split: 0.80
+  val_split: 0.10
+  test_split: 0.10
+  patience: 3
+  max_grad_norm: 1.0
+  num_workers: 4
+  weight_decay: 0.00001
+
+paths:
+  checkpoint_dir: "models/checkpoints"
+  metrics_dir: "models/metrics"
+  pretrained_path: "models/checkpoints/best_model.pth"
+
+# Loss weights for multitask training
+loss_weights:
+  detection: 1.0
+  phase: 0.5
+  magnitude: 0.5
+  location: 0.5
+
+# Normalization constants for target denormalization
+normalization:
+  p_s_max: 6000.0
+  mag_max: 9.0
+  lat_max: 90.0
+  lon_max: 180.0
+  depth_max: 700.0

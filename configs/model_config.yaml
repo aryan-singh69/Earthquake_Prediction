@@ -1,0 +1,33 @@
+# ── Model Architecture Configuration ──────────────────────────
+# Shared settings for all model architectures.
+
+input_channels: 3
+input_length: 6000
+num_classes: 1
+dropout: 0.5
+
+# Encoder architecture (shared by SimpleCNN and MultiTaskCNN)
+encoder:
+  conv1_out: 32
+  conv1_kernel: 21
+  conv1_padding: 10
+  conv2_out: 64
+  conv2_kernel: 15
+  conv2_padding: 7
+  conv3_out: 128
+  conv3_kernel: 11
+  conv3_padding: 5
+  pool_kernel: 4
+  pool_stride: 4
+  flatten_dim: 11904     # 128 * (6000 / 4 / 4 / 4) = 128 * 93 = 11904
+
+# SimpleCNN-specific
+simple_cnn:
+  fc1_out: 512
+  fc2_out: 128
+
+# MultiTaskCNN-specific
+multitask_cnn:
+  fc_shared_out: 512
+  head_hidden: 128
+  head_dropout: 0.3
