@@ -4,22 +4,30 @@ import tempfile
 import numpy as np
 import pandas as pd
 import h5py
-import torch
-import torch.nn.functional as F
 from flask import Flask, render_template, request, jsonify, send_from_directory
 
 # Temp folder D: pe set karo
 tempfile.tempdir = 'D:\\Earthquake_Prediction\\uploads'
 
-# Model import
+# Model + predictor import
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
-from models import MultiTaskCNN  # SimpleCNN hata diya — MultiTaskCNN hi use hoga
+from inference.predictor import Predictor
 
 app = Flask(__name__)
 
 UPLOAD_FOLDER        = 'D:\\Earthquake_Prediction\\uploads'
 SAMPLE_FOLDER        = 'D:\\Earthquake_Prediction\\samples'
-MULTITASK_MODEL_PATH = 'D:\\Earthquake_Prediction\\models\\multitask_model.pth'
+MULTITASK_MODEL_PATH = 'D:\\Earthquake_Prediction\\models\\checkpoints\\multitask_model.pth'
+
+def validate_waveform_shape(data: np.ndarray) -> np.ndarray:
+    """Ensure input is (3, 6000) or (6000, 3), return (3, 6000)."""
+    if data.ndim != 2:
+        raise ValueError("Waveform must be 2D with shape (3, 6000) or (6000, 3)")
+    if data.shape not in [(3, 6000), (6000, 3)]:
+        raise ValueError("Invalid shape; expected (3, 6000) or (6000, 3)")
+    if data.shape == (6000, 3):
+        data = data.T
+    return data
 
 app.config['UPLOAD_FOLDER']      = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024
@@ -28,96 +36,26 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(SAMPLE_FOLDER, exist_ok=True)
 os.makedirs('notebooks',   exist_ok=True)
 
-# Normalization constants — train.py se same
-P_S_MAX   = 6000.0
-MAG_MAX   = 9.0
-LAT_MAX   = 90.0
-LON_MAX   = 180.0
-DEPTH_MAX = 700.0
-
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-print(f"Using device: {device}")
-
-# Single Model — MultiTaskCNN (Detection + Phase + Mag + Loc)
-multitask_model = MultiTaskCNN().to(device)
-
-if os.path.exists(MULTITASK_MODEL_PATH):
-    multitask_model.load_state_dict(
-        torch.load(MULTITASK_MODEL_PATH, map_location=device, weights_only=True)
-    )
-    print(" MultiTask Model (multitask_model.pth) loaded!")
-else:
-    print(" multitask_model.pth nahi mila — untrained model use ho raha hai!")
-
-multitask_model.eval()
+predictor = Predictor(model_path=MULTITASK_MODEL_PATH)
 
 
-def normalize_waveform(data: np.ndarray) -> np.ndarray:
-    """Per-channel zero-mean, unit-std normalization. data shape: (3, 6000)"""
-    mean = data.mean(axis=1, keepdims=True)
-    std  = data.std(axis=1,  keepdims=True) + 1e-8
-    return (data - mean) / std
-
-
-def normalize_shape(data: np.ndarray) -> np.ndarray:
-    """Any input shape → (6000, 3)"""
-    if data.ndim == 1:
-        data = np.stack([data, data, data], axis=1)
-    if data.shape == (3, 6000):
-        data = data.T
-    if data.shape[0] == 3:
-        data = data.T
-    return data  # (6000, 3)
-
-
-def run_prediction(data: np.ndarray) -> dict:
-    """data: numpy (6000, 3) → predict sab kuch"""
-    waveform = data.T                        # (3, 6000)
-    waveform = normalize_waveform(waveform)  # normalize — zaroori hai
-    tensor   = torch.tensor(waveform, dtype=torch.float32).unsqueeze(0).to(device)
-
-    with torch.no_grad():
-        outputs = multitask_model(tensor)
-
-    # Detection
-    prob       = torch.sigmoid(outputs['detection']).item()
-    prediction = "Earthquake" if prob >= 0.5 else "Noise"
-    confidence = round(prob * 100, 2) if prob >= 0.5 else round((1 - prob) * 100, 2)
-
-    # Phase picking — denormalize
-    phase    = outputs['phase'].squeeze().cpu().numpy()
-    p_sample = float(phase[0]) * P_S_MAX
-    s_sample = float(phase[1]) * P_S_MAX
-    p_sec    = round(p_sample / 100, 2)
-    s_sec    = round(s_sample / 100, 2)
-
-    # Magnitude — denormalize
-    magnitude = float(outputs['magnitude'].squeeze().cpu().numpy()) * MAG_MAX
-    magnitude = round(max(0.0, min(9.0, magnitude)), 2)
-
-    # Location — denormalize
-    loc       = outputs['location'].squeeze().cpu().numpy()
-    latitude  = round(max(-90.0,  min(90.0,  float(loc[0]) * LAT_MAX)),   4)
-    longitude = round(max(-180.0, min(180.0, float(loc[1]) * LON_MAX)),   4)
-    depth     = round(max(0.0,    min(700.0, float(loc[2]) * DEPTH_MAX)), 2)
-
-    print(f"  [MultiTaskCNN] {prediction} ({confidence}%) | "
-          f"P:{p_sec}s S:{s_sec}s | Mag:{magnitude} | "
-          f"Lat:{latitude} Lon:{longitude} Depth:{depth}km")
-
-    # Noise hone pe phase/mag/loc None karo
-    if prediction == "Noise":
-        p_sec = s_sec = magnitude = latitude = longitude = depth = None
-
+def prepare_waveform_for_plot(data: np.ndarray) -> dict:
+    """Downsample waveform for visualization without affecting inference."""
+    step = int(os.getenv("VIS_DOWNSAMPLE", "5"))
+    step = max(1, step)
+    x = np.arange(0, data.shape[1], step)
+    # Display normalization only (per-channel max-abs scaling)
+    display = data.astype(np.float32).copy()
+    for i in range(display.shape[0]):
+        max_abs = float(np.max(np.abs(display[i])))
+        if max_abs > 0:
+            display[i] = display[i] / max_abs
     return {
-        "prediction": prediction,
-        "confidence": confidence,
-        "p_arrival":  p_sec,
-        "s_arrival":  s_sec,
-        "magnitude":  magnitude,
-        "latitude":   latitude,
-        "longitude":  longitude,
-        "depth":      depth
+        "waveform_x": x.tolist(),
+        "waveform_e": display[0, ::step].tolist(),
+        "waveform_n": display[1, ::step].tolist(),
+        "waveform_z": display[2, ::step].tolist(),
+        "waveform_normalized": True,
     }
 
 
@@ -136,6 +74,8 @@ def dashboard():
 
 @app.route('/predict', methods=['POST'])
 def predict():
+    if not os.path.exists(MULTITASK_MODEL_PATH):
+        return jsonify({"status": "error", "message": "Model not found"}), 500
     if 'file' not in request.files:
         return jsonify({"status": "error", "message": "No file part"}), 400
 
@@ -161,14 +101,43 @@ def predict():
             return jsonify({"status": "error", "message": "Unsupported format. Use .npy, .csv, .hdf5"}), 400
 
         print(f"Loaded shape: {data.shape}")
-        data   = normalize_shape(data)
-        result = run_prediction(data)
+        data   = validate_waveform_shape(data)
+        plot_payload = prepare_waveform_for_plot(data)
+        result = predictor.predict(data)
+        p_sec = result.get("p_arrival_sec")
+        s_sec = result.get("s_arrival_sec")
+        alert = result.get("alert")
+        prediction = result.get("prediction")
+        early_warning = False
+        warning_time_sec = None
+        emergency_message = "P/S timing unavailable or unreliable."
+        if (
+            prediction == "Earthquake"
+            and alert is True
+            and p_sec is not None
+            and s_sec is not None
+            and s_sec > p_sec
+        ):
+            warning_time_sec = round(float(s_sec - p_sec), 2)
+            early_warning = warning_time_sec > 0
+            if early_warning:
+                emergency_message = (
+                    "Strong earthquake shaking may begin in approximately "
+                    f"{warning_time_sec:.2f} seconds.\n\n"
+                    "Take immediate action:\n"
+                    "• Move to a safe place\n"
+                    "• Drop, Cover, and Hold On\n\n"
+                    f"Estimated time remaining: {warning_time_sec:.2f} seconds"
+                )
 
         return jsonify({
             "status":    "success",
-            "waveform":  data.T.tolist(),
+            **plot_payload,
             "file_type": fname.split('.')[-1].upper(),
-            **result
+            **result,
+            "early_warning": early_warning,
+            "warning_time_sec": warning_time_sec,
+            "emergency_message": emergency_message
         })
 
     except Exception as e:
@@ -178,6 +147,8 @@ def predict():
 
 @app.route('/load-sample/<sample_type>')
 def load_sample(sample_type):
+    if not os.path.exists(MULTITASK_MODEL_PATH):
+        return jsonify({"status": "error", "message": "Model not found"}), 500
     prefix = 'earthquake_local' if sample_type == 'earthquake' else 'noise'
 
     try:
@@ -190,14 +161,43 @@ def load_sample(sample_type):
             return jsonify({"status": "error", "message": f"No sample found: {sample_type}"}), 404
 
         data   = np.load(os.path.join(SAMPLE_FOLDER, files[0]), allow_pickle=True)
-        data   = normalize_shape(data)
-        result = run_prediction(data)
+        data   = validate_waveform_shape(data)
+        plot_payload = prepare_waveform_for_plot(data)
+        result = predictor.predict(data)
+        p_sec = result.get("p_arrival_sec")
+        s_sec = result.get("s_arrival_sec")
+        alert = result.get("alert")
+        prediction = result.get("prediction")
+        early_warning = False
+        warning_time_sec = None
+        emergency_message = "P/S timing unavailable or unreliable."
+        if (
+            prediction == "Earthquake"
+            and alert is True
+            and p_sec is not None
+            and s_sec is not None
+            and s_sec > p_sec
+        ):
+            warning_time_sec = round(float(s_sec - p_sec), 2)
+            early_warning = warning_time_sec > 0
+            if early_warning:
+                emergency_message = (
+                    "Strong earthquake shaking may begin in approximately "
+                    f"{warning_time_sec:.2f} seconds.\n\n"
+                    "Take immediate action:\n"
+                    "• Move to a safe place\n"
+                    "• Drop, Cover, and Hold On\n\n"
+                    f"Estimated time remaining: {warning_time_sec:.2f} seconds"
+                )
 
         return jsonify({
             "status":    "success",
-            "waveform":  data.T.tolist(),
+            **plot_payload,
             "file_type": "NPY (Sample)",
-            **result
+            **result,
+            "early_warning": early_warning,
+            "warning_time_sec": warning_time_sec,
+            "emergency_message": emergency_message
         })
 
     except Exception as e:

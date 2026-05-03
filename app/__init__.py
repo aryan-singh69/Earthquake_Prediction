@@ -1,1 +1,1 @@
-# app — FastAPI deployment application
+"""FastAPI application package."""

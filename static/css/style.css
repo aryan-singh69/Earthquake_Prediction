@@ -6,6 +6,8 @@
     --color-red: #ff4444;
     --color-purple: #a55eea;
     --color-blue: #3498db;
+    --color-green: #22c55e;
+    --color-amber: #f59e0b;
 }
 
 body {
@@ -46,6 +48,38 @@ body {
 
 .text-blue {
     color: var(--color-blue) !important;
+}
+
+.alert-badge {
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+.alert-safe {
+    background-color: var(--color-green);
+    color: #0b1f12;
+}
+
+.alert-warning {
+    background-color: var(--color-red);
+    color: #1b0909;
+}
+
+.alert-possible {
+    background-color: var(--color-amber);
+    color: #2a1c08;
+}
+
+.emergency-card {
+    border-color: var(--color-red) !important;
+    box-shadow: 0 0 18px rgba(255, 68, 68, 0.35);
+    animation: emergencyPulse 1.2s infinite;
+}
+
+@keyframes emergencyPulse {
+    0% { box-shadow: 0 0 10px rgba(255, 68, 68, 0.25); }
+    50% { box-shadow: 0 0 22px rgba(255, 68, 68, 0.55); }
+    100% { box-shadow: 0 0 10px rgba(255, 68, 68, 0.25); }
 }
 
 .btn-cyan {
@@ -151,4 +185,44 @@ body {
 
 .leaflet-container a.leaflet-popup-close-button {
     color: #ccc;
+}
+
+.emergency-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    z-index: 2000;
+}
+
+.emergency-modal-card {
+    width: min(540px, 100%);
+    background: #2a0f12;
+    color: #fff;
+    border: 2px solid var(--color-red);
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 0 28px rgba(255, 68, 68, 0.55);
+    animation: emergencyModalPulse 1s infinite;
+}
+
+.emergency-modal-card.urgent {
+    border-color: #ff1f1f;
+    animation: emergencyModalUrgentPulse 0.45s infinite;
+    box-shadow: 0 0 42px rgba(255, 0, 0, 0.92);
+}
+
+@keyframes emergencyModalPulse {
+    0% { transform: scale(1); box-shadow: 0 0 18px rgba(255, 68, 68, 0.40); }
+    50% { transform: scale(1.01); box-shadow: 0 0 34px rgba(255, 68, 68, 0.72); }
+    100% { transform: scale(1); box-shadow: 0 0 18px rgba(255, 68, 68, 0.40); }
+}
+
+@keyframes emergencyModalUrgentPulse {
+    0% { transform: scale(1); box-shadow: 0 0 24px rgba(255, 0, 0, 0.75); }
+    50% { transform: scale(1.02); box-shadow: 0 0 48px rgba(255, 0, 0, 1); }
+    100% { transform: scale(1); box-shadow: 0 0 24px rgba(255, 0, 0, 0.75); }
 }

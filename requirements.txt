@@ -1,12 +1,25 @@
-h5py==3.10
+# ── Core ML ───────────────────────────────
+torch
 numpy
 pandas
-obspy
-torch
-torchaudio
-torchvision
+h5py
 scikit-learn
 matplotlib
-jupyter
-wandb
+seaborn
 tqdm
+
+# ── API / Deployment ─────────────────────
+fastapi
+uvicorn
+python-multipart
+
+# ── Configuration ────────────────────────
+pyyaml
+
+# ── Model Export (optional) ──────────────
+# onnx
+# onnxruntime
+
+# ── Development ──────────────────────────
+pytest
+jupyter

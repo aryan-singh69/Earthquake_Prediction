@@ -7,11 +7,13 @@
         <div class="card bg-card border-custom mb-4">
             <div class="card-body">
                 <h4 class="card-title text-white mb-4">Upload Seismic Data</h4>
+                <div id="errorBanner" class="alert alert-danger" style="display:none;"></div>
                 <form id="uploadForm">
                     <div class="mb-3">
-                        <label class="form-label text-light">Select File (.npy, .csv, .hdf5, .h5)</label>
+                        <label class="form-label text-light">Select File (.npy)</label>
                         <input type="file" class="form-control bg-dark text-white border-secondary" id="fileInput"
-                            accept=".npy,.csv,.hdf5,.h5" required>
+                            accept=".npy" required>
+                        <div class="form-text text-muted">Accepted shape: (3, 6000) or (6000, 3)</div>
                     </div>
                     <div class="mb-4">
                         <span class="badge" id="fileTypeBadge" style="background:#444; color:#fff;">No File</span>
@@ -32,12 +34,48 @@
 
         <!-- Result Cards (Initially Hidden) -->
         <div id="resultsContainer" style="display: none;">
+            <!-- Emergency Warning -->
+            <div class="card bg-card border-custom result-card mb-3 emergency-card" id="cardEmergency" style="display:none;">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0 text-white">EMERGENCY WARNING</h5>
+                        <span class="badge alert-badge alert-warning">ALERT</span>
+                    </div>
+                    <p class="mt-2 mb-1 text-white" id="resEmergencyMessage"></p>
+                    <p class="mb-0 text-white">Estimated warning window: <span id="resWarningWindow" class="fw-bold"></span></p>
+                </div>
+            </div>
+
             <!-- Card 1: Classification -->
             <div class="card bg-card border-custom result-card mb-3 glowing-border" id="cardClass">
                 <div class="card-body">
-                    <h6 class="text-light mb-1">Classification</h6>
-                    <h3 id="resClassText" class="mb-0"></h3>
-                    <span class="badge bg-secondary mt-2" id="resConfidence"></span>
+                    <h6 class="text-light mb-1">Prediction</h6>
+                    <h3 id="resClassText" class="mb-1"></h3>
+                    <div class="d-flex flex-wrap gap-2 align-items-center">
+                        <span class="badge bg-secondary" id="resConfidence"></span>
+                        <span class="badge" id="resAlertStatus"></span>
+                    </div>
+                    <p class="mb-0 text-white mt-2">Decision reason: <span id="resDecisionReason" class="fw-bold"></span></p>
+                </div>
+            </div>
+
+            <!-- Card 1b: Explanation -->
+            <div class="card bg-card border-custom result-card mb-3 glowing-border" id="cardExplanation">
+                <div class="card-body">
+                    <h6 class="text-light mb-2">Explanation</h6>
+                    <p class="mb-1 text-white" id="resExplanation"></p>
+                    <p class="mb-0 text-white small text-muted" id="resPhaseNote"></p>
+                </div>
+            </div>
+
+            <!-- Card 1c: Detailed Metrics -->
+            <div class="card bg-card border-custom result-card mb-3 glowing-border" id="cardDecision">
+                <div class="card-body">
+                    <h6 class="text-light mb-2">Detection Metrics</h6>
+                    <p class="mb-1 text-white">Threshold used: <span id="resThreshold" class="fw-bold"></span></p>
+                    <p class="mb-1 text-white">Alert: <span id="resAlert" class="fw-bold"></span></p>
+                    <p class="mb-1 text-white">Signal energy: <span id="resEnergy" class="fw-bold"></span></p>
+                    <p class="mb-0 text-white">Signal variance: <span id="resVariance" class="fw-bold"></span></p>
                 </div>
             </div>
 
@@ -74,6 +112,7 @@
                         <div class="col-4">Lon: <br><span id="resLon" class="fw-bold"></span></div>
                         <div class="col-4">Depth:<br><span id="resDepth" class="fw-bold"></span> km</div>
                     </div>
+                    <p class="mb-0 text-white small text-muted">Status: <span id="resLocStatus"></span></p>
                 </div>
             </div>
 
@@ -99,6 +138,19 @@
                 </div>
                 <div id="waveform-plot" style="width:100%; min-height:450px; display:none;"></div>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- Emergency Modal -->
+<div id="emergencyModal" class="emergency-modal-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="emergencyModalTitle">
+    <div class="emergency-modal-card">
+        <h4 id="emergencyModalTitle" class="mb-2">EMERGENCY WARNING</h4>
+        <p id="emergencyModalMessage" class="mb-2"></p>
+        <p class="mb-3">Estimated warning window: <span id="emergencyModalWindow" class="fw-bold"></span></p>
+        <div class="d-flex gap-2 justify-content-end flex-wrap">
+            <button id="emergencyViewDetailsBtn" type="button" class="btn btn-outline-light btn-sm">Details</button>
+            <button id="emergencyCloseBtn" type="button" class="btn btn-danger btn-sm">Acknowledge</button>
         </div>
     </div>
 </div>

@@ -1,1 +1,1 @@
-# src.inference — Prediction pipeline and postprocessing
+# Inference utilities (predictor + postprocess)

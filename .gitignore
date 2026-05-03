@@ -5,6 +5,7 @@ __pycache__/
 
 # Virtual Environments
 venv/
+.venv/
 .env
 .env.*
 
@@ -21,9 +22,17 @@ venv/
 *.hdf5
 *.hdf
 *.h5
-data/
+*.csv
 merge.csv
 merge.hdf5
+
+# Data directories
+data/raw/
+data/processed/
+
+# Model artifacts
+models/checkpoints/
+models/exported/
 
 # User Uploads
 uploads/
@@ -34,3 +43,6 @@ uploads/
 # OS Files
 .DS_Store
 Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
