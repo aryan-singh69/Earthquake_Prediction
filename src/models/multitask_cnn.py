@@ -108,6 +108,92 @@ class MultiTaskCNN(nn.Module):
         }
 
 
+class MultiTaskCNNImproved(nn.Module):
+    """
+    Improved multitask model with stronger regression heads.
+
+    - Detection head stays close to baseline for compatibility/stability.
+    - Phase and magnitude heads are deepened.
+    - Location head is optional (disabled by default).
+    """
+
+    def __init__(self, in_channels=3, use_location_head=False):
+        super(MultiTaskCNNImproved, self).__init__()
+        self.use_location_head = use_location_head
+
+        # Shared encoder (kept same as baseline to preserve behavior)
+        self.conv1 = nn.Conv1d(in_channels, 32, kernel_size=21, stride=1, padding=10)
+        self.pool1 = nn.MaxPool1d(kernel_size=4, stride=4)
+
+        self.conv2 = nn.Conv1d(32, 64, kernel_size=15, stride=1, padding=7)
+        self.pool2 = nn.MaxPool1d(kernel_size=4, stride=4)
+
+        self.conv3 = nn.Conv1d(64, 128, kernel_size=11, stride=1, padding=5)
+        self.pool3 = nn.MaxPool1d(kernel_size=4, stride=4)
+
+        self.fc_shared = nn.Linear(11904, 512)
+        self.dropout = nn.Dropout(0.5)
+
+        # Detection head (stable / compatible)
+        self.detection_head = nn.Sequential(
+            nn.Linear(512, 128),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(128, 1)
+        )
+
+        # Improved phase head
+        self.phase_head = nn.Sequential(
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.LayerNorm(256),
+            nn.Dropout(0.4),
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(128, 2)
+        )
+
+        # Improved magnitude head
+        self.magnitude_head = nn.Sequential(
+            nn.Linear(512, 128),
+            nn.ReLU(),
+            nn.LayerNorm(128),
+            nn.Dropout(0.3),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1)
+        )
+
+        if self.use_location_head:
+            self.location_head = nn.Sequential(
+                nn.Linear(512, 128),
+                nn.ReLU(),
+                nn.Dropout(0.3),
+                nn.Linear(128, 3)
+            )
+
+    def forward(self, x):
+        x = F.relu(self.conv1(x)); x = self.pool1(x)
+        x = F.relu(self.conv2(x)); x = self.pool2(x)
+        x = F.relu(self.conv3(x)); x = self.pool3(x)
+
+        x = x.view(x.size(0), -1)
+        x = F.relu(self.fc_shared(x))
+        x = self.dropout(x)
+
+        outputs = {
+            'detection': self.detection_head(x),
+            'phase': self.phase_head(x),
+            'magnitude': self.magnitude_head(x),
+        }
+
+        if self.use_location_head:
+            outputs['location'] = self.location_head(x)
+
+        return outputs
+
+
 def load_pretrained_encoder(model, pretrained_path, device):
     """
     Load pretrained SimpleCNN encoder weights into a MultiTaskCNN.
