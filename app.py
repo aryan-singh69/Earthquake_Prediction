@@ -1,23 +1,30 @@
 import os
 import sys
 import tempfile
+import json
 import numpy as np
 import pandas as pd
 import h5py
 from flask import Flask, render_template, request, jsonify, send_from_directory
 
-# Temp folder D: pe set karo
-tempfile.tempdir = 'D:\\Earthquake_Prediction\\uploads'
+PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
+UPLOAD_FOLDER = os.path.join(PROJECT_ROOT, 'uploads')
+SAMPLE_FOLDER = os.path.join(PROJECT_ROOT, 'data', 'samples')
+NOTEBOOKS_FOLDER = os.path.join(PROJECT_ROOT, 'notebooks')
+MULTITASK_MODEL_PATH = os.path.join(PROJECT_ROOT, 'models', 'checkpoints', 'multitask_model.pth')
+SAMPLE_FILES = {
+    'earthquake': 'earthquake_demo.npy',
+    'noise': 'noise_demo.npy',
+}
+
+tempfile.tempdir = UPLOAD_FOLDER
 
 # Model + predictor import
-sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
+sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 from inference.predictor import Predictor
+from inference.postprocess import resolve_threshold
 
 app = Flask(__name__)
-
-UPLOAD_FOLDER        = 'D:\\Earthquake_Prediction\\uploads'
-SAMPLE_FOLDER        = 'D:\\Earthquake_Prediction\\samples'
-MULTITASK_MODEL_PATH = 'D:\\Earthquake_Prediction\\models\\checkpoints\\multitask_model.pth'
 
 def validate_waveform_shape(data: np.ndarray) -> np.ndarray:
     """Ensure input is (3, 6000) or (6000, 3), return (3, 6000)."""
@@ -34,9 +41,62 @@ app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(SAMPLE_FOLDER, exist_ok=True)
-os.makedirs('notebooks',   exist_ok=True)
+os.makedirs(NOTEBOOKS_FOLDER, exist_ok=True)
 
 predictor = Predictor(model_path=MULTITASK_MODEL_PATH)
+
+
+def format_percent(value):
+    if value is None:
+        return "N/A"
+    return f"{float(value) * 100:.2f}%"
+
+
+def format_metric(value, digits=3):
+    if value is None:
+        return "N/A"
+    if isinstance(value, int):
+        return str(value)
+    return f"{float(value):.{digits}f}"
+
+
+def load_json_file(path):
+    if not os.path.exists(path):
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def get_dashboard_context():
+    final_summary = load_json_file(os.path.join(PROJECT_ROOT, "models", "metrics", "final_summary.json"))
+    multitask_metrics = load_json_file(os.path.join(PROJECT_ROOT, "models", "metrics", "multitask_metrics.json"))
+    threshold_used, _ = resolve_threshold(predictor.recommended_threshold)
+
+    return {
+        "evaluation": {
+            "accuracy": format_percent(final_summary.get("accuracy")),
+            "precision": format_percent(final_summary.get("precision")),
+            "recall": format_percent(final_summary.get("recall")),
+            "f1": format_percent(final_summary.get("f1") or final_summary.get("f1_score")),
+            "false_positives": format_metric(final_summary.get("false_positives"), 0),
+            "false_negatives": format_metric(final_summary.get("false_negatives"), 0),
+            "p_wave_mae_sec": format_metric(final_summary.get("p_wave_mae_sec"), 2),
+            "magnitude_mae": format_metric(final_summary.get("magnitude_mae"), 2),
+        },
+        "model_settings": {
+            "threshold": format_metric(threshold_used, 3),
+            "model_path": os.path.relpath(MULTITASK_MODEL_PATH, PROJECT_ROOT),
+            "model_status": "Active" if os.path.exists(MULTITASK_MODEL_PATH) else "Missing",
+            "sample_rate": "100 Hz",
+            "input_shape": "(3, 6000) or (6000, 3)",
+            "p_wave_rmse_sec": format_metric(multitask_metrics.get("p_wave_rmse_sec"), 2),
+            "s_wave_rmse_sec": format_metric(multitask_metrics.get("s_wave_rmse_sec"), 2),
+        },
+    }
+
+
+def render_dashboard():
+    return render_template('upload.html', **get_dashboard_context())
 
 
 def prepare_waveform_for_plot(data: np.ndarray) -> dict:
@@ -59,18 +119,60 @@ def prepare_waveform_for_plot(data: np.ndarray) -> dict:
     }
 
 
+def build_prediction_payload(data: np.ndarray, file_type: str, filename: str | None = None) -> dict:
+    data = validate_waveform_shape(data)
+    plot_payload = prepare_waveform_for_plot(data)
+    result = predictor.predict(data)
+    p_sec = result.get("p_arrival_sec")
+    s_sec = result.get("s_arrival_sec")
+    alert = result.get("alert")
+    prediction = result.get("prediction")
+    early_warning = False
+    warning_time_sec = None
+    emergency_message = "P/S timing unavailable or unreliable."
+
+    if (
+        prediction == "Earthquake"
+        and alert is True
+        and p_sec is not None
+        and s_sec is not None
+        and s_sec > p_sec
+    ):
+        warning_time_sec = round(float(s_sec - p_sec), 2)
+        early_warning = warning_time_sec > 0
+        if early_warning:
+            emergency_message = (
+                "Strong earthquake shaking may begin in approximately "
+                f"{warning_time_sec:.2f} seconds.\n"
+                "Take immediate action: Move to a safe place. Drop, Cover, and Hold On."
+            )
+
+    payload = {
+        "status": "success",
+        **plot_payload,
+        "file_type": file_type,
+        **result,
+        "early_warning": early_warning,
+        "warning_time_sec": warning_time_sec,
+        "emergency_message": emergency_message,
+    }
+    if filename:
+        payload["filename"] = filename
+    return payload
+
+
 # Routes
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_dashboard()
 
 @app.route('/upload')
 def upload():
-    return render_template('upload.html')
+    return render_dashboard()
 
 @app.route('/dashboard')
 def dashboard():
-    return render_template('dashboard.html')
+    return render_dashboard()
 
 @app.route('/predict', methods=['POST'])
 def predict():
@@ -101,104 +203,49 @@ def predict():
             return jsonify({"status": "error", "message": "Unsupported format. Use .npy, .csv, .hdf5"}), 400
 
         print(f"Loaded shape: {data.shape}")
-        data   = validate_waveform_shape(data)
-        plot_payload = prepare_waveform_for_plot(data)
-        result = predictor.predict(data)
-        p_sec = result.get("p_arrival_sec")
-        s_sec = result.get("s_arrival_sec")
-        alert = result.get("alert")
-        prediction = result.get("prediction")
-        early_warning = False
-        warning_time_sec = None
-        emergency_message = "P/S timing unavailable or unreliable."
-        if (
-            prediction == "Earthquake"
-            and alert is True
-            and p_sec is not None
-            and s_sec is not None
-            and s_sec > p_sec
-        ):
-            warning_time_sec = round(float(s_sec - p_sec), 2)
-            early_warning = warning_time_sec > 0
-            if early_warning:
-                emergency_message = (
-                    "Strong earthquake shaking may begin in approximately "
-                    f"{warning_time_sec:.2f} seconds.\n\n"
-                    "Take immediate action:\n"
-                    "• Move to a safe place\n"
-                    "• Drop, Cover, and Hold On\n\n"
-                    f"Estimated time remaining: {warning_time_sec:.2f} seconds"
-                )
-
-        return jsonify({
-            "status":    "success",
-            **plot_payload,
-            "file_type": fname.split('.')[-1].upper(),
-            **result,
-            "early_warning": early_warning,
-            "warning_time_sec": warning_time_sec,
-            "emergency_message": emergency_message
-        })
+        payload = build_prediction_payload(
+            data,
+            file_type=fname.split('.')[-1].upper(),
+            filename=fname,
+        )
+        return jsonify(payload)
 
     except Exception as e:
         print(f"Error: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+@app.route('/sample/<sample_type>')
 @app.route('/load-sample/<sample_type>')
 def load_sample(sample_type):
     if not os.path.exists(MULTITASK_MODEL_PATH):
         return jsonify({"status": "error", "message": "Model not found"}), 500
-    prefix = 'earthquake_local' if sample_type == 'earthquake' else 'noise'
+
+    if sample_type not in SAMPLE_FILES:
+        return jsonify({
+            "status": "error",
+            "message": "Unknown sample type. Use earthquake or noise.",
+        }), 400
+
+    sample_filename = SAMPLE_FILES[sample_type]
+    sample_path = os.path.join(SAMPLE_FOLDER, sample_filename)
+    rel_sample_path = os.path.relpath(sample_path, PROJECT_ROOT)
 
     try:
-        files = sorted([
-            f for f in os.listdir(SAMPLE_FOLDER)
-            if f.startswith(prefix) and f.endswith('.npy')
-        ])
+        if not os.path.exists(sample_path):
+            return jsonify({
+                "status": "error",
+                "message": f"Demo sample missing: {rel_sample_path}",
+            }), 404
 
-        if not files:
-            return jsonify({"status": "error", "message": f"No sample found: {sample_type}"}), 404
-
-        data   = np.load(os.path.join(SAMPLE_FOLDER, files[0]), allow_pickle=True)
-        data   = validate_waveform_shape(data)
-        plot_payload = prepare_waveform_for_plot(data)
-        result = predictor.predict(data)
-        p_sec = result.get("p_arrival_sec")
-        s_sec = result.get("s_arrival_sec")
-        alert = result.get("alert")
-        prediction = result.get("prediction")
-        early_warning = False
-        warning_time_sec = None
-        emergency_message = "P/S timing unavailable or unreliable."
-        if (
-            prediction == "Earthquake"
-            and alert is True
-            and p_sec is not None
-            and s_sec is not None
-            and s_sec > p_sec
-        ):
-            warning_time_sec = round(float(s_sec - p_sec), 2)
-            early_warning = warning_time_sec > 0
-            if early_warning:
-                emergency_message = (
-                    "Strong earthquake shaking may begin in approximately "
-                    f"{warning_time_sec:.2f} seconds.\n\n"
-                    "Take immediate action:\n"
-                    "• Move to a safe place\n"
-                    "• Drop, Cover, and Hold On\n\n"
-                    f"Estimated time remaining: {warning_time_sec:.2f} seconds"
-                )
-
-        return jsonify({
-            "status":    "success",
-            **plot_payload,
-            "file_type": "NPY (Sample)",
-            **result,
-            "early_warning": early_warning,
-            "warning_time_sec": warning_time_sec,
-            "emergency_message": emergency_message
-        })
+        data = np.load(sample_path, allow_pickle=True)
+        payload = build_prediction_payload(
+            data,
+            file_type="NPY (Sample)",
+            filename=sample_filename,
+        )
+        payload["sample_type"] = sample_type
+        return jsonify(payload)
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -206,7 +253,7 @@ def load_sample(sample_type):
 
 @app.route('/notebooks/<path:filename>')
 def serve_notebooks(filename):
-    return send_from_directory('notebooks', filename)
+    return send_from_directory(NOTEBOOKS_FOLDER, filename)
 
 
 if __name__ == '__main__':

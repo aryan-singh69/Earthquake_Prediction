@@ -4,51 +4,91 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>STEAD Seismic Classification</title>
-    <!-- Bootstrap CSS -->
+    <title>Seismic AI Monitoring</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-    <!-- Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <!-- Custom CSS -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 
 <body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-custom-dark border-bottom custom-border">
-        <div class="container">
-            <a class="navbar-brand text-cyan fw-bold" href="/">SeismicAI</a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav ms-auto">
-                    <li class="nav-item">
-                        <a class="nav-link" href="/">Home</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/upload">Upload & Predict</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/dashboard">Dashboard</a>
-                    </li>
-                </ul>
+    <div class="app-shell">
+        <aside class="sidebar" aria-label="Primary navigation">
+            <a class="brand-block" href="#dashboard-section">
+                <span class="brand-mark"><i data-lucide="activity"></i></span>
+                <span>
+                    <span class="brand-title">Seismic AI</span>
+                    <span class="brand-subtitle">Monitoring Console</span>
+                </span>
+            </a>
+
+            <nav class="sidebar-nav">
+                <a class="sidebar-link active" href="#dashboard-section" data-section="dashboard-section">
+                    <i data-lucide="layout-dashboard"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a class="sidebar-link" href="#upload-section" data-section="upload-section">
+                    <i data-lucide="upload-cloud"></i>
+                    <span>Upload Data</span>
+                </a>
+                <a class="sidebar-link" href="#waveform-section" data-section="waveform-section">
+                    <i data-lucide="waves"></i>
+                    <span>Seismic Waveform</span>
+                </a>
+                <a class="sidebar-link" href="#alerts-section" data-section="alerts-section">
+                    <i data-lucide="siren"></i>
+                    <span>Alerts</span>
+                </a>
+                <a class="sidebar-link" href="#metrics-section" data-section="metrics-section">
+                    <i data-lucide="gauge"></i>
+                    <span>Metrics</span>
+                </a>
+                <a class="sidebar-link" href="#reports-section" data-section="reports-section">
+                    <i data-lucide="file-bar-chart"></i>
+                    <span>Reports</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="mini-status">
+                    <span class="status-dot live"></span>
+                    <span>Model Active</span>
+                </div>
+                <div class="mini-status muted">
+                    <span class="status-dot"></span>
+                    <span>Location Experimental</span>
+                </div>
             </div>
+        </aside>
+
+        <div class="app-main">
+            <header class="topbar">
+                <div>
+                    <div class="eyebrow">Real-time decision support</div>
+                    <h1>Seismic AI Monitoring</h1>
+                </div>
+
+                <div class="topbar-actions">
+                    <div class="search-shell">
+                        <i data-lucide="search"></i>
+                        <span>Station / Event Search</span>
+                    </div>
+                    <div class="topbar-time" id="headerTime">--:--</div>
+                    <span class="status-pill status-live">LIVE DEMO</span>
+                    <span class="status-pill status-active">Model Active</span>
+                </div>
+            </header>
+
+            <main class="content-area">
+                {% block content %}{% endblock %}
+            </main>
         </div>
-    </nav>
+    </div>
 
-    <main class="container my-5">
-        {% block content %}{% endblock %}
-    </main>
-
-    <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <!-- Plotly.js -->
     <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
-    <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <!-- Custom JS -->
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 

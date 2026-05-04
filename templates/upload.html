@@ -1,153 +1,355 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="row">
-    <!-- Left Column: Upload Form -->
-    <div class="col-lg-4 mb-4">
-        <div class="card bg-card border-custom mb-4">
-            <div class="card-body">
-                <h4 class="card-title text-white mb-4">Upload Seismic Data</h4>
-                <div id="errorBanner" class="alert alert-danger" style="display:none;"></div>
-                <form id="uploadForm">
-                    <div class="mb-3">
-                        <label class="form-label text-light">Select File (.npy)</label>
-                        <input type="file" class="form-control bg-dark text-white border-secondary" id="fileInput"
-                            accept=".npy" required>
-                        <div class="form-text text-muted">Accepted shape: (3, 6000) or (6000, 3)</div>
-                    </div>
-                    <div class="mb-4">
-                        <span class="badge" id="fileTypeBadge" style="background:#444; color:#fff;">No File</span>
-                    </div>
-                    <button type="submit" class="btn btn-cyan w-100 py-2" id="predictBtn">Predict</button>
-                </form>
-
-                <hr class="border-secondary my-4">
-
-                <h5 class="text-white mb-3">Try specific samples</h5>
-                <div class="d-grid gap-2">
-                    <button class="btn btn-outline-cyan" onclick="loadSample('earthquake')">Try Earthquake
-                        Sample</button>
-                    <button class="btn btn-outline-danger" onclick="loadSample('noise')">Try Noise Sample</button>
-                </div>
-            </div>
+<section class="dashboard-overview page-section" id="dashboard-section">
+    <div class="overview-band">
+        <div>
+            <span class="section-kicker">Dashboard</span>
+            <h2>Live Seismic Operations</h2>
+            <p>Upload waveform data, run detection, inspect phase picks, and review model health from one monitoring surface.</p>
         </div>
-
-        <!-- Result Cards (Initially Hidden) -->
-        <div id="resultsContainer" style="display: none;">
-            <!-- Emergency Warning -->
-            <div class="card bg-card border-custom result-card mb-3 emergency-card" id="cardEmergency" style="display:none;">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0 text-white">EMERGENCY WARNING</h5>
-                        <span class="badge alert-badge alert-warning">ALERT</span>
-                    </div>
-                    <p class="mt-2 mb-1 text-white" id="resEmergencyMessage"></p>
-                    <p class="mb-0 text-white">Estimated warning window: <span id="resWarningWindow" class="fw-bold"></span></p>
-                </div>
-            </div>
-
-            <!-- Card 1: Classification -->
-            <div class="card bg-card border-custom result-card mb-3 glowing-border" id="cardClass">
-                <div class="card-body">
-                    <h6 class="text-light mb-1">Prediction</h6>
-                    <h3 id="resClassText" class="mb-1"></h3>
-                    <div class="d-flex flex-wrap gap-2 align-items-center">
-                        <span class="badge bg-secondary" id="resConfidence"></span>
-                        <span class="badge" id="resAlertStatus"></span>
-                    </div>
-                    <p class="mb-0 text-white mt-2">Decision reason: <span id="resDecisionReason" class="fw-bold"></span></p>
-                </div>
-            </div>
-
-            <!-- Card 1b: Explanation -->
-            <div class="card bg-card border-custom result-card mb-3 glowing-border" id="cardExplanation">
-                <div class="card-body">
-                    <h6 class="text-light mb-2">Explanation</h6>
-                    <p class="mb-1 text-white" id="resExplanation"></p>
-                    <p class="mb-0 text-white small text-muted" id="resPhaseNote"></p>
-                </div>
-            </div>
-
-            <!-- Card 1c: Detailed Metrics -->
-            <div class="card bg-card border-custom result-card mb-3 glowing-border" id="cardDecision">
-                <div class="card-body">
-                    <h6 class="text-light mb-2">Detection Metrics</h6>
-                    <p class="mb-1 text-white">Threshold used: <span id="resThreshold" class="fw-bold"></span></p>
-                    <p class="mb-1 text-white">Alert: <span id="resAlert" class="fw-bold"></span></p>
-                    <p class="mb-1 text-white">Signal energy: <span id="resEnergy" class="fw-bold"></span></p>
-                    <p class="mb-0 text-white">Signal variance: <span id="resVariance" class="fw-bold"></span></p>
-                </div>
-            </div>
-
-            <!-- Card 2: Phase Picking -->
-            <div class="card bg-card border-custom result-card mb-3 glowing-border" id="cardPhase">
-                <div class="card-body">
-                    <h6 class="text-light mb-2">Phase Picking</h6>
-                    <p class="mb-1 text-white">P-wave: <span id="resPWave" class="fw-bold text-cyan"></span></p>
-                    <p class="mb-1 text-white">S-wave: <span id="resSWave" class="fw-bold text-red"></span></p>
-                    <p class="mb-0 text-white small text-muted">PS gap: <span id="resPSGap"></span></p>
-                </div>
-            </div>
-
-            <!-- Card 3: Magnitude -->
-            <div class="card bg-card border-custom result-card mb-3 glowing-border" id="cardMag">
-                <div class="card-body">
-                    <h6 class="text-light mb-2">Magnitude</h6>
-                    <div class="d-flex align-items-center mb-2">
-                        <h3 id="resMagVal" class="mb-0 me-2 text-white"></h3>
-                        <span id="resMagLabel" class="badge"></span>
-                    </div>
-                    <div class="progress bg-dark" style="height: 6px;">
-                        <div id="resMagBar" class="progress-bar magnitude-bar" role="progressbar"></div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Card 4: Location -->
-            <div class="card bg-card border-custom result-card mb-3 glowing-border" id="cardLoc">
-                <div class="card-body">
-                    <h6 class="text-light mb-2">Location</h6>
-                    <div class="row text-white small">
-                        <div class="col-4">Lat: <br><span id="resLat" class="fw-bold"></span></div>
-                        <div class="col-4">Lon: <br><span id="resLon" class="fw-bold"></span></div>
-                        <div class="col-4">Depth:<br><span id="resDepth" class="fw-bold"></span> km</div>
-                    </div>
-                    <p class="mb-0 text-white small text-muted">Status: <span id="resLocStatus"></span></p>
-                </div>
-            </div>
-
-            <!-- Card 5: Interactive Map -->
-            <div class="card bg-card border-custom result-card mb-3 glowing-border" id="cardMap">
-                <div class="card-body p-2">
-                    <div id="mapContainer"></div>
-                </div>
-            </div>
+        <div class="overview-actions">
+            <span class="status-pill status-live">LIVE DEMO</span>
+            <span class="status-pill status-active">Model Active</span>
         </div>
     </div>
 
-    <!-- Right Column: Live Waveform -->
-    <div class="col-lg-8">
-        <div class="card bg-card border-custom h-100">
-            <div class="card-header border-secondary d-flex justify-content-between align-items-center py-3">
-                <h5 class="mb-0 text-white" id="plotTitle">Live Waveform</h5>
-                <span class="badge bg-success" id="liveBadge" style="display:none;">Live</span>
-            </div>
-            <div class="card-body d-flex align-items-center justify-content-center flex-column" id="plotContainer"
-                style="min-height: 450px;">
-                <div id="plotPlaceholderText" class="text-muted">Upload a file or select a sample to view waveform.
+    <div class="overview-metrics">
+        <div class="panel-card">
+            <span class="section-kicker">Detection Accuracy</span>
+            <strong>{{ evaluation.accuracy }}</strong>
+            <p>Latest evaluation summary.</p>
+        </div>
+        <div class="panel-card">
+            <span class="section-kicker">Decision Threshold</span>
+            <strong>{{ model_settings.threshold }}</strong>
+            <p>Current read-only inference threshold.</p>
+        </div>
+        <div class="panel-card">
+            <span class="section-kicker">Input Contract</span>
+            <strong>3 x 6000</strong>
+            <p>Three-channel waveform at {{ model_settings.sample_rate }}.</p>
+        </div>
+    </div>
+</section>
+
+<section class="monitor-grid">
+    <aside class="control-column">
+        <div class="panel-card upload-card page-section" id="upload-section">
+            <div class="panel-heading">
+                <div>
+                    <span class="section-kicker">Input</span>
+                    <h2>Upload Data</h2>
                 </div>
-                <div id="waveform-plot" style="width:100%; min-height:450px; display:none;"></div>
+                <span class="soft-badge">.NPY</span>
+            </div>
+
+            <div id="errorBanner" class="alert alert-danger compact-alert" style="display:none;"></div>
+
+            <form id="uploadForm">
+                <label class="upload-dropzone" id="dropZone" for="fileInput">
+                    <input type="file" id="fileInput" accept=".npy" required>
+                    <span class="drop-icon"><i data-lucide="upload-cloud"></i></span>
+                    <span class="drop-title">Drop waveform file</span>
+                    <span class="drop-copy" id="uploadFileName">Select a 3-channel .npy sample</span>
+                </label>
+
+                <div class="file-row">
+                    <span>File type</span>
+                    <span class="file-badge" id="fileTypeBadge">No File</span>
+                </div>
+
+                <button type="submit" class="btn btn-cyan command-btn w-100" id="predictBtn">
+                    <i data-lucide="radar"></i>
+                    <span>Predict</span>
+                </button>
+            </form>
+
+            <div class="sample-actions">
+                <div class="sample-title">Samples</div>
+                <button class="btn btn-outline-cyan command-btn sample-btn" type="button" onclick="loadSample('earthquake')">
+                    <i data-lucide="activity"></i>
+                    <span>Try Earthquake Sample</span>
+                </button>
+                <button class="btn btn-outline-danger command-btn sample-btn" type="button" onclick="loadSample('noise')">
+                    <i data-lucide="shield-check"></i>
+                    <span>Try Noise Sample</span>
+                </button>
+            </div>
+        </div>
+
+        <div class="panel-card system-card">
+            <div class="panel-heading compact">
+                <div>
+                    <span class="section-kicker">System</span>
+                    <h2>Runtime Status</h2>
+                </div>
+            </div>
+            <div class="system-list">
+                <div>
+                    <span>Inference Engine</span>
+                    <strong>Online</strong>
+                </div>
+                <div>
+                    <span>Model State</span>
+                    <strong class="text-green">Active</strong>
+                </div>
+                <div>
+                    <span>Data Mode</span>
+                    <strong>Demo</strong>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <section class="signal-column">
+        <div class="panel-card waveform-card page-section" id="waveform-section">
+            <div class="waveform-header">
+                <div>
+                    <span class="section-kicker">Waveform</span>
+                    <h2 id="plotTitle">Real-Time Seismic Waveform</h2>
+                    <div class="source-line">
+                        <span id="sourceMeta">Source: awaiting upload</span>
+                        <span id="stationMeta">Station: Demo STN-01</span>
+                    </div>
+                </div>
+                <div class="waveform-actions">
+                    <span class="status-pill status-active" id="liveBadge" style="display:none;">Live</span>
+                    <span class="prediction-badge neutral" id="predictionBadge">Awaiting Data</span>
+                </div>
+            </div>
+
+            <div class="plot-shell" id="plotContainer">
+                <div id="plotPlaceholderText" class="plot-placeholder">
+                    <i data-lucide="waves"></i>
+                    <span>Waveform preview will render here</span>
+                </div>
+                <div id="waveform-plot" style="width:100%; min-height:520px; display:none;"></div>
+            </div>
+        </div>
+
+        <div class="panel-card map-card" id="cardMap">
+            <div class="panel-heading compact">
+                <div>
+                    <span class="section-kicker">Location</span>
+                    <h2>Predicted Event Map</h2>
+                </div>
+                <span class="soft-badge">Experimental</span>
+            </div>
+            <div id="mapPlaceholder" class="map-placeholder">
+                <i data-lucide="map-pinned"></i>
+                <span>Location experimental</span>
+            </div>
+            <div id="mapContainer" style="display:none;"></div>
+        </div>
+    </section>
+
+    <aside class="status-panel" id="resultsContainer">
+        <div class="section-anchor" id="alerts-section"></div>
+        <div class="panel-card emergency-card" id="cardEmergency" style="display:none;">
+            <div class="alert-card-heading">
+                <h2>Emergency Warning</h2>
+                <span class="alert-chip warning">ALERT</span>
+            </div>
+            <p id="resEmergencyMessage"></p>
+            <div class="metric-inline">
+                <span>Warning window</span>
+                <strong id="resWarningWindow">--</strong>
+            </div>
+        </div>
+
+        <div class="panel-card status-card" id="cardClass">
+            <div class="panel-heading compact">
+                <div>
+                    <span class="section-kicker">Detection</span>
+                    <h2>Alert Status</h2>
+                </div>
+                <span class="alert-chip standby" id="resAlertStatus">STANDBY</span>
+            </div>
+            <div class="detection-readout">
+                <span>Detection Status</span>
+                <strong id="resClassText">Awaiting Data</strong>
+            </div>
+            <div class="status-mini-grid">
+                <div>
+                    <span>Confidence</span>
+                    <strong id="resConfidence">--%</strong>
+                </div>
+                <div>
+                    <span>Threshold</span>
+                    <strong id="resThreshold">--</strong>
+                </div>
+            </div>
+            <div class="decision-reason">
+                <span>Decision reason</span>
+                <strong id="resDecisionReason">No waveform processed</strong>
+            </div>
+        </div>
+
+        <div class="panel-card explanation-card" id="cardExplanation">
+            <span class="section-kicker">Interpretation</span>
+            <p id="resExplanation">Awaiting a waveform or demo sample.</p>
+            <small id="resPhaseNote"></small>
+        </div>
+
+        <div class="panel-card metrics-card page-section" id="metrics-section">
+            <div class="panel-heading compact">
+                <div>
+                    <span class="section-kicker">Signal</span>
+                    <h2>Metrics</h2>
+                </div>
+            </div>
+            <div class="metric-list">
+                <div>
+                    <span>Signal energy</span>
+                    <strong id="resEnergy">--</strong>
+                </div>
+                <div>
+                    <span>Signal variance</span>
+                    <strong id="resVariance">--</strong>
+                </div>
+                <div>
+                    <span>Alert flag</span>
+                    <strong id="resAlert">--</strong>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel-card phase-card" id="cardPhase">
+            <div class="panel-heading compact">
+                <div>
+                    <span class="section-kicker">Phase Picking</span>
+                    <h2>Arrivals</h2>
+                </div>
+            </div>
+            <div class="metric-list">
+                <div>
+                    <span>P arrival time</span>
+                    <strong class="text-cyan" id="resPWave">N/A</strong>
+                </div>
+                <div>
+                    <span>S arrival time</span>
+                    <strong class="text-red" id="resSWave">N/A</strong>
+                </div>
+                <div>
+                    <span>S-P gap</span>
+                    <strong id="resPSGap">N/A</strong>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel-card magnitude-card" id="cardMag">
+            <div class="panel-heading compact">
+                <div>
+                    <span class="section-kicker">Magnitude</span>
+                    <h2>Estimate</h2>
+                </div>
+                <span class="soft-badge" id="resMagLabel">N/A</span>
+            </div>
+            <div class="magnitude-value" id="resMagVal">N/A</div>
+            <div class="progress progress-slim">
+                <div id="resMagBar" class="progress-bar magnitude-bar" role="progressbar"></div>
+            </div>
+        </div>
+
+        <div class="panel-card location-card" id="cardLoc">
+            <div class="panel-heading compact">
+                <div>
+                    <span class="section-kicker">Location</span>
+                    <h2>Status</h2>
+                </div>
+                <span class="soft-badge" id="resLocStatus">experimental</span>
+            </div>
+            <div class="location-grid">
+                <div>
+                    <span>Latitude</span>
+                    <strong id="resLat">N/A</strong>
+                </div>
+                <div>
+                    <span>Longitude</span>
+                    <strong id="resLon">N/A</strong>
+                </div>
+                <div>
+                    <span>Depth</span>
+                    <strong><span id="resDepth">N/A</span> km</strong>
+                </div>
+            </div>
+        </div>
+    </aside>
+</section>
+
+<section class="lower-dashboard-grid">
+    <div class="panel-card report-summary-card page-section" id="reports-section">
+        <div class="panel-heading">
+            <div>
+                <span class="section-kicker">Reports</span>
+                <h2>Model Report Summary</h2>
+            </div>
+            <span class="soft-badge">Read Only</span>
+        </div>
+        <div class="report-metric-grid">
+            <div>
+                <span>Accuracy</span>
+                <strong>{{ evaluation.accuracy }}</strong>
+            </div>
+            <div>
+                <span>Precision</span>
+                <strong>{{ evaluation.precision }}</strong>
+            </div>
+            <div>
+                <span>Recall</span>
+                <strong>{{ evaluation.recall }}</strong>
+            </div>
+            <div>
+                <span>F1</span>
+                <strong>{{ evaluation.f1 }}</strong>
+            </div>
+            <div>
+                <span>False positives</span>
+                <strong>{{ evaluation.false_positives }}</strong>
+            </div>
+            <div>
+                <span>False negatives</span>
+                <strong>{{ evaluation.false_negatives }}</strong>
+            </div>
+            <div>
+                <span>Threshold</span>
+                <strong>{{ model_settings.threshold }}</strong>
+            </div>
+            <div>
+                <span>Model status</span>
+                <strong class="text-green">{{ model_settings.model_status }}</strong>
+            </div>
+            <div>
+                <span>Input shape</span>
+                <strong>{{ model_settings.input_shape }}</strong>
+            </div>
+            <div>
+                <span>Sample rate</span>
+                <strong>{{ model_settings.sample_rate }}</strong>
+            </div>
+            <div>
+                <span>Phase RMSE</span>
+                <strong>P {{ model_settings.p_wave_rmse_sec }} sec / S {{ model_settings.s_wave_rmse_sec }} sec</strong>
+            </div>
+            <div>
+                <span>P-wave MAE</span>
+                <strong>{{ evaluation.p_wave_mae_sec }} sec</strong>
+            </div>
+            <div>
+                <span>Magnitude MAE</span>
+                <strong>{{ evaluation.magnitude_mae }}</strong>
             </div>
         </div>
     </div>
-</div>
+</section>
 
-<!-- Emergency Modal -->
 <div id="emergencyModal" class="emergency-modal-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="emergencyModalTitle">
     <div class="emergency-modal-card">
-        <h4 id="emergencyModalTitle" class="mb-2">EMERGENCY WARNING</h4>
-        <p id="emergencyModalMessage" class="mb-2"></p>
-        <p class="mb-3">Estimated warning window: <span id="emergencyModalWindow" class="fw-bold"></span></p>
+        <div class="modal-alert-icon"><i data-lucide="siren"></i></div>
+        <h4 id="emergencyModalTitle">Emergency Warning</h4>
+        <p id="emergencyModalMessage"></p>
+        <p class="modal-window">Warning window: <span id="emergencyModalWindow" class="fw-bold"></span></p>
         <div class="d-flex gap-2 justify-content-end flex-wrap">
             <button id="emergencyViewDetailsBtn" type="button" class="btn btn-outline-light btn-sm">Details</button>
             <button id="emergencyCloseBtn" type="button" class="btn btn-danger btn-sm">Acknowledge</button>

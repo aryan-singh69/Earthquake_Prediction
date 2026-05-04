@@ -25,6 +25,9 @@ venv/
 *.csv
 merge.csv
 merge.hdf5
+!data/samples/
+!data/samples/earthquake_demo.npy
+!data/samples/noise_demo.npy
 
 # Data directories
 data/raw/
