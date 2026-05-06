@@ -15,6 +15,7 @@ Usage:
     CSV_PATH    — metadata CSV   (default: data/raw/merge.csv)
     HDF5_PATH   — waveform HDF5  (default: data/raw/merge.hdf5)
     MODEL_PATH  — checkpoint path (default: models/checkpoints/multitask_model.pth)
+    MODEL_ARCH  — baseline or improved (default: auto from MODEL_PATH, then baseline)
     BATCH_SIZE  — eval batch size (default: 512)
 """
 
@@ -35,8 +36,8 @@ sys.path.insert(0, os.path.join(PROJECT_ROOT, "src"))
 sys.path.insert(0, PROJECT_ROOT)
 
 # ── Import project modules ───────────────────────────────────
-from dataset import STEADDataset
-from models import MultiTaskCNN
+from src.dataset import STEADDataset
+from src.models.multitask_cnn import MultiTaskCNN, MultiTaskCNNImproved
 from src.utils.metrics import (
     compute_all_metrics,
     save_metrics_to_json,
@@ -45,13 +46,50 @@ from src.utils.metrics import (
 )
 
 
+VALID_MODEL_ARCHES = {"baseline", "improved"}
+
+
+def resolve_model_arch(model_path):
+    env_arch = os.getenv("MODEL_ARCH")
+    if env_arch:
+        model_arch = env_arch.strip().lower()
+    elif "improved" in os.path.basename(model_path).lower():
+        model_arch = "improved"
+    else:
+        model_arch = "baseline"
+
+    if model_arch not in VALID_MODEL_ARCHES:
+        valid = ", ".join(sorted(VALID_MODEL_ARCHES))
+        print(f"  ERROR: MODEL_ARCH must be one of: {valid}. Got: {model_arch}")
+        sys.exit(1)
+
+    return model_arch
+
+
+def create_model(model_arch):
+    if model_arch == "baseline":
+        return MultiTaskCNN()
+
+    return MultiTaskCNNImproved(use_location_head=False)
+
+
 def main():
     # ── Configuration (relative paths, overridable via env) ───
-    csv_path    = os.getenv("CSV_PATH",   "data/raw/merge.csv")
-    hdf5_path   = os.getenv("HDF5_PATH",  "data/raw/merge.hdf5")
-    model_path  = os.getenv("MODEL_PATH", "models/checkpoints/multitask_model.pth")
-    batch_size  = int(os.getenv("BATCH_SIZE", "512"))
+    csv_path = os.getenv("CSV_PATH", "data/raw/merge.csv")
+    hdf5_path = os.getenv("HDF5_PATH", "data/raw/merge.hdf5")
 
+    default_improved = "models/checkpoints/multitask_model_improved.pth"
+    default_baseline = "models/checkpoints/multitask_model.pth"
+
+    default_model = (
+        default_improved
+        if os.path.exists(os.path.join(PROJECT_ROOT, default_improved))
+        else default_baseline
+    )
+
+    model_path = os.getenv("MODEL_PATH", default_model)
+
+    batch_size = int(os.getenv("BATCH_SIZE", "512"))
     # Resolve relative paths against project root
     if not os.path.isabs(csv_path):
         csv_path = os.path.join(PROJECT_ROOT, csv_path)
@@ -59,6 +97,7 @@ def main():
         hdf5_path = os.path.join(PROJECT_ROOT, hdf5_path)
     if not os.path.isabs(model_path):
         model_path = os.path.join(PROJECT_ROOT, model_path)
+    model_arch = resolve_model_arch(model_path)
 
     metrics_dir = os.path.join(PROJECT_ROOT, "models", "metrics")
 
@@ -75,6 +114,7 @@ def main():
     print("  EARTHQUAKE DETECTION — MODEL EVALUATION")
     print("=" * 60)
     print(f"  Model     : {model_path}")
+    print(f"  Arch      : {model_arch}")
     print(f"  CSV       : {csv_path}")
     print(f"  HDF5      : {hdf5_path}")
     print(f"  Device    : {device}")
@@ -115,18 +155,19 @@ def main():
         Subset(full_dataset, test_idx),
         batch_size=batch_size,
         shuffle=False,
-        num_workers=4,
-        pin_memory=True,
+        num_workers=0,
+        pin_memory=torch.cuda.is_available(),
     )
 
     # ── Load model ────────────────────────────────────────────
     print("  Loading model checkpoint...")
-    model = MultiTaskCNN().to(device)
+    model = create_model(model_arch).to(device)
     model.load_state_dict(
         torch.load(model_path, map_location=device, weights_only=True)
     )
     model.eval()
     print("  Model loaded successfully!\n")
+    has_location_output = False
 
     # ── Run inference on test set ─────────────────────────────
     all_labels = []
@@ -144,6 +185,7 @@ def main():
 
     # Run inference, but HDF5 handles may fail in multi-worker mode — catch and retry single-threaded
     def run_inference(loader):
+        nonlocal has_location_output
         local_all_labels = []
         local_all_preds  = []
         local_all_probs  = []
@@ -166,6 +208,7 @@ def main():
                 trace_ids = batch["trace_name"]
 
                 outputs   = model(features)
+                has_location_output = has_location_output or ("location" in outputs)
                 probs     = torch.sigmoid(outputs["detection"]).cpu().numpy().squeeze(1)
                 preds     = (probs >= 0.5).astype(int)
 
@@ -230,9 +273,24 @@ def main():
     y_prob = np.array(all_probs)
 
     metrics = compute_all_metrics(y_true, y_pred, y_prob=y_prob)
+    location_status = "experimental" if has_location_output else "unavailable"
+    location_metrics = {
+        "status": location_status,
+        "output_present": bool(has_location_output),
+        "message": (
+            "Location output is present, but location metrics are experimental "
+            "and are not computed by this evaluator."
+            if has_location_output
+            else "Location output is unavailable for this model architecture/checkpoint."
+        ),
+    }
+
     metrics["model_path"]     = model_path
+    metrics["model_arch"]     = model_arch
     metrics["num_test_samples"] = len(test_idx)
     metrics["inference_time_sec"] = round(elapsed, 2)
+    metrics["location_status"] = location_status
+    metrics["location_metrics"] = location_metrics
 
     # ── Save outputs ──────────────────────────────────────────
     save_metrics_to_json(metrics, report_path)
@@ -244,8 +302,25 @@ def main():
     fn_mask = (y_true == 1) & (y_pred == 0)
     error_mask = fp_mask | fn_mask
 
-    # Compute absolute errors for P/S (in seconds) and magnitude
-    sampling_rate = 100.0  # Hz — convert sample indices -> seconds
+    # ── Phase conversion helper ─────────────────────────────────
+    def convert_phase_to_seconds(values, source):
+        """Convert phase values to seconds.
+
+        Args:
+            values: numpy array of phase values
+            source: "true"  — STEAD ground-truth sample indices (divide by 100 Hz)
+                    "pred"  — normalized model outputs (multiply by 60 sec window)
+        Returns:
+            numpy array in seconds
+        """
+        if source == "true":
+            return values / 100.0
+        elif source == "pred":
+            return values * 60.0
+        else:
+            raise ValueError(f"Unknown source: {source!r}. Use 'true' or 'pred'.")
+
+    # ── Build raw arrays ──────────────────────────────────────
     p_true_arr = np.array(all_p_true, dtype=float)
     s_true_arr = np.array(all_s_true, dtype=float)
     p_pred_arr = np.array(all_p_pred, dtype=float)
@@ -253,18 +328,48 @@ def main():
     mag_true_arr = np.array(all_mag_true, dtype=float)
     mag_pred_arr = np.array(all_mag_pred, dtype=float)
 
-    # Absolute errors (seconds for P/S). Use NaN where ground-truth is missing or non-positive.
-    valid_p_mask = p_true_arr >= 0
-    valid_s_mask = s_true_arr >= 0
+    # ── Convert to seconds ────────────────────────────────────
+    p_true_sec = convert_phase_to_seconds(p_true_arr, "true")
+    s_true_sec = convert_phase_to_seconds(s_true_arr, "true")
+    p_pred_sec = convert_phase_to_seconds(p_pred_arr, "pred")
+    s_pred_sec = convert_phase_to_seconds(s_pred_arr, "pred")
+
+    # ── Sanity debug prints ───────────────────────────────────
+    print("  [DEBUG] Phase conversion sanity check:")
+    print(f"    P true sec  — min: {np.nanmin(p_true_sec):.4f}, max: {np.nanmax(p_true_sec):.4f}")
+    print(f"    P pred sec  — min: {np.nanmin(p_pred_sec):.4f}, max: {np.nanmax(p_pred_sec):.4f}")
+    print(f"    S true sec  — min: {np.nanmin(s_true_sec):.4f}, max: {np.nanmax(s_true_sec):.4f}")
+    print(f"    S pred sec  — min: {np.nanmin(s_pred_sec):.4f}, max: {np.nanmax(s_pred_sec):.4f}")
+    if np.nanmax(p_true_sec) > 100 or np.nanmax(s_true_sec) > 100:
+        print("    ⚠ WARNING: true phase seconds exceed 100 — check conversion!")
+    if np.nanmax(p_pred_sec) > 100 or np.nanmax(s_pred_sec) > 100:
+        print("    ⚠ WARNING: predicted phase seconds exceed 100 — check conversion!")
+    print()
+
+    # ── Validity masks ────────────────────────────────────────
+    eq_mask = (y_true == 1)
+    valid_p_true = (p_true_arr >= 0)
+    valid_s_true = (s_true_arr >= 0)
+    valid_p_pred = np.isfinite(p_pred_arr)
+    valid_s_pred = np.isfinite(s_pred_arr)
+
+    # Compute errors only on earthquake samples with valid labels & predictions
+    p_valid = eq_mask & valid_p_true & valid_p_pred
+    s_valid = eq_mask & valid_s_true & valid_s_pred
+
     abs_error_p_sec = np.full_like(p_true_arr, np.nan, dtype=float)
     abs_error_s_sec = np.full_like(s_true_arr, np.nan, dtype=float)
-    abs_error_p_sec[valid_p_mask] = np.abs(p_pred_arr[valid_p_mask] - p_true_arr[valid_p_mask]) / sampling_rate
-    abs_error_s_sec[valid_s_mask] = np.abs(s_pred_arr[valid_s_mask] - s_true_arr[valid_s_mask]) / sampling_rate
 
-    # Magnitude absolute error
+    abs_error_p_sec[p_valid] = np.abs(p_pred_sec[p_valid] - p_true_sec[p_valid])
+    abs_error_s_sec[s_valid] = np.abs(s_pred_sec[s_valid] - s_true_sec[s_valid])
+
+    # ── Magnitude absolute error (earthquake samples only) ────
+    valid_mag_true = np.isfinite(mag_true_arr)
+    valid_mag_pred = np.isfinite(mag_pred_arr)
+    eq_mag_mask = eq_mask & valid_mag_true & valid_mag_pred
+
     mag_error = np.full_like(mag_true_arr, np.nan, dtype=float)
-    mag_valid_mask = ~np.isnan(mag_true_arr)
-    mag_error[mag_valid_mask] = np.abs(mag_pred_arr[mag_valid_mask] - mag_true_arr[mag_valid_mask])
+    mag_error[eq_mag_mask] = np.abs(mag_pred_arr[eq_mag_mask] - mag_true_arr[eq_mag_mask])
 
     error_rows = {
         "trace_name":     np.array(all_traces, dtype=object)[error_mask],
@@ -337,25 +442,23 @@ def main():
     # ── Multi-task metrics: P/S arrival and magnitude errors ─────────────────
     multitask_metrics = {}
 
-    # P-wave metrics (seconds)
-    if valid_p_mask.any():
-        p_wave_mae_sec = float(np.nanmean(abs_error_p_sec[valid_p_mask]))
-        p_wave_rmse_sec = float(np.sqrt(np.nanmean(abs_error_p_sec[valid_p_mask] ** 2)))
+    # P-wave metrics (seconds) — earthquake samples only
+    if p_valid.any():
+        p_wave_mae_sec = float(np.nanmean(abs_error_p_sec[p_valid]))
+        p_wave_rmse_sec = float(np.sqrt(np.nanmean(abs_error_p_sec[p_valid] ** 2)))
     else:
         p_wave_mae_sec = None
         p_wave_rmse_sec = None
 
-    # S-wave metrics (seconds)
-    if valid_s_mask.any():
-        s_wave_mae_sec = float(np.nanmean(abs_error_s_sec[valid_s_mask]))
-        s_wave_rmse_sec = float(np.sqrt(np.nanmean(abs_error_s_sec[valid_s_mask] ** 2)))
+    # S-wave metrics (seconds) — earthquake samples only
+    if s_valid.any():
+        s_wave_mae_sec = float(np.nanmean(abs_error_s_sec[s_valid]))
+        s_wave_rmse_sec = float(np.sqrt(np.nanmean(abs_error_s_sec[s_valid] ** 2)))
     else:
         s_wave_mae_sec = None
         s_wave_rmse_sec = None
 
-    # Magnitude metrics (only earthquake samples)
-    eq_mask = (y_true == 1)
-    eq_mag_mask = eq_mask & (~np.isnan(mag_true_arr))
+    # Magnitude metrics (earthquake samples only, already computed via eq_mag_mask)
     if eq_mag_mask.any():
         magnitude_mae = float(np.nanmean(mag_error[eq_mag_mask]))
         magnitude_rmse = float(np.sqrt(np.nanmean((mag_error[eq_mag_mask]) ** 2)))
@@ -369,6 +472,8 @@ def main():
     multitask_metrics["s_wave_rmse_sec"] = s_wave_rmse_sec
     multitask_metrics["magnitude_mae"] = magnitude_mae
     multitask_metrics["magnitude_rmse"] = magnitude_rmse
+    multitask_metrics["location_status"] = location_status
+    multitask_metrics["location_metrics"] = location_metrics
 
     multitask_path = os.path.join(metrics_dir, "multitask_metrics.json")
     with open(multitask_path, "w") as f:
@@ -377,17 +482,21 @@ def main():
 
     # ── Final summary JSON (combined) ───────────────────────
     cm = metrics.get("confusion_matrix", [[0, 0], [0, 0]])
+    
     final_summary = {
-        "accuracy": metrics.get("accuracy"),
-        "precision": metrics.get("precision"),
-        "recall": metrics.get("recall"),
-        "f1": metrics.get("f1_score"),
-        "roc_auc": metrics.get("roc_auc"),
-        "p_wave_mae_sec": p_wave_mae_sec,
-        "magnitude_mae": magnitude_mae,
-        "false_positives": int(cm[0][1]) if cm is not None else None,
-        "false_negatives": int(cm[1][0]) if cm is not None else None,
-    }
+    "accuracy": metrics.get("accuracy"),
+    "precision": metrics.get("precision"),
+    "recall": metrics.get("recall"),
+    "f1": metrics.get("f1_score"),
+    "roc_auc": metrics.get("roc_auc"),
+    "model_arch": model_arch,
+    "location_status": location_status,
+    "p_wave_mae_sec": p_wave_mae_sec,
+    "s_wave_mae_sec": s_wave_mae_sec,
+    "magnitude_mae": magnitude_mae,
+    "false_positives": int(cm[0][1]) if cm is not None else None,
+    "false_negatives": int(cm[1][0]) if cm is not None else None,
+}
 
     final_path = os.path.join(metrics_dir, "final_summary.json")
     with open(final_path, "w") as f:
@@ -399,6 +508,7 @@ def main():
     print(f"P-wave MAE: {p_wave_mae_sec if p_wave_mae_sec is not None else 'N/A'} sec")
     print(f"S-wave MAE: {s_wave_mae_sec if s_wave_mae_sec is not None else 'N/A'} sec")
     print(f"Magnitude MAE: {magnitude_mae if magnitude_mae is not None else 'N/A'}")
+    print(f"Location metrics: {location_status}")
 
     # ── Print summary ─────────────────────────────────────────
     print_metrics_summary(metrics)
@@ -406,7 +516,7 @@ def main():
     print(f"  Output files:")
     print(f"    → {report_path}")
     print(f"    → {cm_path}")
-    print("\n  Evaluation complete! ✅\n")
+    print("\n  Evaluation complete! \n")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,6 @@
+{
+  "best_score": 0.859708243327523,
+  "best_val_loss": 0.006164121813735879,
+  "checkpoint_path": "D:\\Earthquake_Prediction\\models/checkpoints/multitask_model_improved.pth",
+  "use_location_head": false
+}

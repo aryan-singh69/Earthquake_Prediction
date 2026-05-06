@@ -34,11 +34,23 @@ class STEADDataset(Dataset):
         self.metadata['source_longitude'] = self.metadata['source_longitude'].fillna(0.0)
         self.metadata['source_depth_km']  = self.metadata['source_depth_km'].fillna(0.0)
 
+        # Cache metadata as NumPy arrays once. This avoids pandas iloc work in
+        # every __getitem__ call while preserving the exact same sample content.
+        self.trace_names = self.metadata['trace_name'].astype(str).to_numpy()
+        self.labels = self.metadata['label'].to_numpy(dtype=np.float32)
+        self.p_arrivals = self.metadata['p_arrival_sample'].to_numpy(dtype=np.float32)
+        self.s_arrivals = self.metadata['s_arrival_sample'].to_numpy(dtype=np.float32)
+        self.magnitudes = self.metadata['source_magnitude'].to_numpy(dtype=np.float32)
+        self.latitudes = self.metadata['source_latitude'].to_numpy(dtype=np.float32)
+        self.longitudes = self.metadata['source_longitude'].to_numpy(dtype=np.float32)
+        self.depths = self.metadata['source_depth_km'].to_numpy(dtype=np.float32)
+        self.num_samples = len(self.trace_names)
+
         if preload_indices is not None:
             print(f"Preloading {len(preload_indices)} samples into RAM...")
             with h5py.File(hdf5_file, 'r') as f:
                 for i, idx in enumerate(preload_indices):
-                    trace_name      = self.metadata.iloc[idx]['trace_name']
+                    trace_name      = self.trace_names[idx]
                     self.cache[idx] = f['data'][trace_name][()]
                     if i % 10000 == 0:
                         print(f"  {i}/{len(preload_indices)} loaded...")
@@ -51,6 +63,20 @@ class STEADDataset(Dataset):
                 self.hdf5_file, 'r',
                 swmr=True
             )
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state['h5_file_handle'] = None
+        state['metadata'] = None
+        return state
+
+    def __del__(self):
+        handle = getattr(self, 'h5_file_handle', None)
+        if handle is not None:
+            try:
+                handle.close()
+            except Exception:
+                pass
 
     @staticmethod
     def normalize_waveform(data: np.ndarray) -> np.ndarray:
@@ -65,11 +91,10 @@ class STEADDataset(Dataset):
         return (data - mean) / std
 
     def __len__(self):
-        return len(self.metadata)
+        return self.num_samples
 
     def __getitem__(self, idx):
-        row        = self.metadata.iloc[idx]
-        trace_name = row['trace_name']
+        trace_name = self.trace_names[idx]
 
         # ── Waveform load karo ────────────────────────────────
         if idx in self.cache:
@@ -78,15 +103,15 @@ class STEADDataset(Dataset):
             self._open_h5()
             data = self.h5_file_handle['data'][trace_name][()]
 
-        data     = data.T                          # (6000, 3) → (3, 6000)
-        data     = self.normalize_waveform(data)   # ✅ normalize — loss fix
-        features = torch.tensor(data, dtype=torch.float32)
+        data     = np.asarray(data, dtype=np.float32).T  # (6000, 3) → (3, 6000)
+        data     = self.normalize_waveform(data).astype(np.float32, copy=False)
+        features = torch.from_numpy(np.ascontiguousarray(data))
 
         # ── Detection only ────────────────────────────────────
         if self.task == "detection":
             return {
                 'features':   features,
-                'label':      torch.tensor(row['label'], dtype=torch.float32),
+                'label':      torch.tensor(self.labels[idx], dtype=torch.float32),
                 'trace_name': trace_name
             }
 
@@ -94,8 +119,8 @@ class STEADDataset(Dataset):
         elif self.task == "picking":
             return {
                 'features':   features,
-                'p_arrival':  torch.tensor(row['p_arrival_sample'], dtype=torch.float32),
-                's_arrival':  torch.tensor(row['s_arrival_sample'], dtype=torch.float32),
+                'p_arrival':  torch.tensor(self.p_arrivals[idx], dtype=torch.float32),
+                's_arrival':  torch.tensor(self.s_arrivals[idx], dtype=torch.float32),
                 'trace_name': trace_name
             }
 
@@ -103,13 +128,13 @@ class STEADDataset(Dataset):
         elif self.task == "multitask":
             return {
                 'features':   features,
-                'label':      torch.tensor(row['label'],            dtype=torch.float32),
-                'p_arrival':  torch.tensor(row['p_arrival_sample'], dtype=torch.float32),
-                's_arrival':  torch.tensor(row['s_arrival_sample'], dtype=torch.float32),
-                'magnitude':  torch.tensor(row['source_magnitude'], dtype=torch.float32),
-                'latitude':   torch.tensor(row['source_latitude'],  dtype=torch.float32),
-                'longitude':  torch.tensor(row['source_longitude'], dtype=torch.float32),
-                'depth':      torch.tensor(row['source_depth_km'],  dtype=torch.float32),
+                'label':      torch.tensor(self.labels[idx], dtype=torch.float32),
+                'p_arrival':  torch.tensor(self.p_arrivals[idx], dtype=torch.float32),
+                's_arrival':  torch.tensor(self.s_arrivals[idx], dtype=torch.float32),
+                'magnitude':  torch.tensor(self.magnitudes[idx], dtype=torch.float32),
+                'latitude':   torch.tensor(self.latitudes[idx], dtype=torch.float32),
+                'longitude':  torch.tensor(self.longitudes[idx], dtype=torch.float32),
+                'depth':      torch.tensor(self.depths[idx], dtype=torch.float32),
                 'trace_name': trace_name
             }
 

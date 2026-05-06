@@ -6,8 +6,11 @@ from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 import os
 import sys
+import time
 import numpy as np
 import pandas as pd
+
+from torch.cuda.amp import autocast, GradScaler
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -27,6 +30,25 @@ W_DET   = 1.0
 W_PHASE = 0.5
 W_MAG   = 0.5
 W_LOC   = 0.5
+
+
+def make_dataloader(dataset, batch_size, shuffle, num_workers, pin_memory,
+                    persistent_workers=True, prefetch_factor=2):
+    kwargs = {
+        'batch_size': batch_size,
+        'shuffle': shuffle,
+        'num_workers': num_workers,
+        'pin_memory': pin_memory,
+    }
+    if num_workers > 0:
+        kwargs['persistent_workers'] = persistent_workers
+        kwargs['prefetch_factor'] = prefetch_factor
+    return DataLoader(dataset, **kwargs)
+
+
+def sync_if_cuda(device):
+    if device.type == 'cuda':
+        torch.cuda.synchronize()
 
 
 def prepare_targets(batch, device):
@@ -92,7 +114,7 @@ def train():
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32       = True
 
-    batch_size      = 512
+    batch_size      = 256
     epochs          = 20
     csv_path        = "merge.csv"
     hdf5_path       = "merge.hdf5"
@@ -100,9 +122,23 @@ def train():
     pretrained_path = "models/best_model.pth"
     save_path       = "models/multitask_model.pth"
     max_grad_norm   = 1.0
+    num_workers     = min(8, max(4, (os.cpu_count() or 8) // 2))
+    prefetch_factor = 2
+    perf_log_interval = 50
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
+    if torch.cuda.is_available():
+        print(f"GPU: {torch.cuda.get_device_name(0)}")
+
+    pin_memory = device.type == 'cuda'
+    use_amp = device.type == 'cuda'
+    print(
+        f"DataLoader: batch_size={batch_size}, num_workers={num_workers}, "
+        f"pin_memory={pin_memory}, persistent_workers=True, "
+        f"prefetch_factor={prefetch_factor}"
+    )
+    print(f"Mixed precision AMP: {'enabled' if use_amp else 'disabled'}")
 
     # ── Dataset ───────────────────────────────────────────────
     print("Loading metadata...")
@@ -128,17 +164,32 @@ def train():
         preload_indices=None
     )
 
-    train_loader = DataLoader(
+    train_loader = make_dataloader(
         torch.utils.data.Subset(full_dataset, train_idx),
-        batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=True,
+        prefetch_factor=prefetch_factor,
     )
-    val_loader = DataLoader(
+    val_loader = make_dataloader(
         torch.utils.data.Subset(full_dataset, val_idx),
-        batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=True,
+        prefetch_factor=prefetch_factor,
     )
-    test_loader = DataLoader(
+    test_loader = make_dataloader(
         torch.utils.data.Subset(full_dataset, test_idx),
-        batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=True,
+        prefetch_factor=prefetch_factor,
     )
 
     # ── Model ─────────────────────────────────────────────────
@@ -167,6 +218,7 @@ def train():
     phase_loss_fn     = nn.MSELoss()
     magnitude_loss_fn = nn.MSELoss()
     location_loss_fn  = nn.MSELoss()
+    scaler = GradScaler(enabled=use_amp)
 
     best_val_loss = float('inf')
     no_improve    = 0
@@ -176,39 +228,74 @@ def train():
         model.train()
         running = {'loss': 0.0, 'det': 0.0, 'ph': 0.0, 'mag': 0.0, 'loc': 0.0}
         loop    = tqdm(train_loader, leave=True)
+        perf = {'load': 0.0, 'compute': 0.0, 'samples': 0, 'batches': 0}
+        data_wait_start = time.perf_counter()
 
-        for batch in loop:
+        for step, batch in enumerate(loop, start=1):
+            batch_ready = time.perf_counter()
+            load_time = batch_ready - data_wait_start
+            compute_start = time.perf_counter()
+
             features  = batch['features'].to(device, non_blocking=True)
             det_label, p_arr, s_arr, mag, lat, lon, depth = prepare_targets(batch, device)
 
-            optimizer.zero_grad()
-            outputs = model(features)
+            optimizer.zero_grad(set_to_none=True)
+            with autocast(enabled=use_amp):
+                outputs = model(features)
 
-            loss, loss_det, loss_phase, loss_mag, loss_loc = compute_losses(
-                outputs, det_label, p_arr, s_arr, mag, lat, lon, depth,
-                detection_loss_fn, phase_loss_fn, magnitude_loss_fn, location_loss_fn,
-                device
-            )
+                loss, loss_det, loss_phase, loss_mag, loss_loc = compute_losses(
+                    outputs, det_label, p_arr, s_arr, mag, lat, lon, depth,
+                    detection_loss_fn, phase_loss_fn, magnitude_loss_fn, location_loss_fn,
+                    device
+                )
 
-            loss.backward()
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
+            sync_if_cuda(device)
 
             bs = features.size(0)
-            running['loss'] += loss.item()       * bs
-            running['det']  += loss_det.item()   * bs
-            running['ph']   += loss_phase.item() * bs
-            running['mag']  += loss_mag.item()   * bs
-            running['loc']  += loss_loc.item()   * bs
+            loss_value = loss.item()
+            loss_det_value = loss_det.item()
+            loss_phase_value = loss_phase.item()
+            loss_mag_value = loss_mag.item()
+            loss_loc_value = loss_loc.item()
+
+            running['loss'] += loss_value       * bs
+            running['det']  += loss_det_value   * bs
+            running['ph']   += loss_phase_value * bs
+            running['mag']  += loss_mag_value   * bs
+            running['loc']  += loss_loc_value   * bs
+
+            compute_time = time.perf_counter() - compute_start
+            perf['load'] += load_time
+            perf['compute'] += compute_time
+            perf['samples'] += bs
+            perf['batches'] += 1
 
             loop.set_description(f"Epoch [{epoch+1}/{epochs}]")
             loop.set_postfix(
-                loss=f"{loss.item():.4f}",
-                det=f"{loss_det.item():.3f}",
-                ph=f"{loss_phase.item():.3f}",
-                mag=f"{loss_mag.item():.3f}",
-                loc=f"{loss_loc.item():.3f}"
+                loss=f"{loss_value:.4f}",
+                det=f"{loss_det_value:.3f}",
+                ph=f"{loss_phase_value:.3f}",
+                mag=f"{loss_mag_value:.3f}",
+                loc=f"{loss_loc_value:.3f}"
             )
+
+            if perf_log_interval > 0 and step % perf_log_interval == 0:
+                elapsed = perf['load'] + perf['compute']
+                tqdm.write(
+                    f"[perf] epoch={epoch+1} step={step} "
+                    f"iter={elapsed / max(1, perf['batches']):.3f}s "
+                    f"load={perf['load'] / max(1, perf['batches']):.3f}s "
+                    f"compute={perf['compute'] / max(1, perf['batches']):.3f}s "
+                    f"samples/sec={perf['samples'] / max(elapsed, 1e-9):.1f}"
+                )
+                perf = {'load': 0.0, 'compute': 0.0, 'samples': 0, 'batches': 0}
+
+            data_wait_start = time.perf_counter()
 
         train_loss = running['loss'] / len(train_idx)
 
@@ -223,13 +310,14 @@ def train():
                 features  = batch['features'].to(device, non_blocking=True)
                 det_label, p_arr, s_arr, mag, lat, lon, depth = prepare_targets(batch, device)
 
-                outputs = model(features)
+                with autocast(enabled=use_amp):
+                    outputs = model(features)
 
-                loss, loss_det, loss_phase, loss_mag, loss_loc = compute_losses(
-                    outputs, det_label, p_arr, s_arr, mag, lat, lon, depth,
-                    detection_loss_fn, phase_loss_fn, magnitude_loss_fn, location_loss_fn,
-                    device
-                )
+                    loss, loss_det, loss_phase, loss_mag, loss_loc = compute_losses(
+                        outputs, det_label, p_arr, s_arr, mag, lat, lon, depth,
+                        detection_loss_fn, phase_loss_fn, magnitude_loss_fn, location_loss_fn,
+                        device
+                    )
 
                 bs = features.size(0)
                 val_running['loss'] += loss.item()       * bs
@@ -285,9 +373,10 @@ def train():
 
     with torch.no_grad():
         for batch in test_loader:
-            features  = batch['features'].to(device)
-            det_label = batch['label'].to(device).unsqueeze(1).float()
-            outputs   = model(features)
+            features  = batch['features'].to(device, non_blocking=True)
+            det_label = batch['label'].to(device, non_blocking=True).unsqueeze(1).float()
+            with autocast(enabled=use_amp):
+                outputs = model(features)
             preds     = torch.sigmoid(outputs['detection']) >= 0.5
             correct  += (preds == det_label.bool()).sum().item()
             total    += det_label.size(0)

@@ -1,47 +1,54 @@
 {
-  "accuracy": 0.9991080151212675,
-  "precision": 0.9989780275932549,
-  "recall": 0.9992333248147202,
-  "f1_score": 0.9991056598952345,
+  "accuracy": 0.999235441532515,
+  "precision": 0.9993609406952966,
+  "recall": 0.9991055456171736,
+  "f1_score": 0.9992332268370607,
   "confusion_matrix": [
     [
-      23584,
-      24
+      23593,
+      15
     ],
     [
-      18,
-      23460
+      21,
+      23457
     ]
   ],
   "classification_report": {
     "Noise": {
-      "precision": 0.9992373527667147,
-      "recall": 0.9989833954591664,
-      "f1-score": 0.9991103579750052,
+      "precision": 0.9991106970441264,
+      "recall": 0.999364622161979,
+      "f1-score": 0.9992376434712634,
       "support": 23608.0
     },
     "Earthquake": {
-      "precision": 0.9989780275932549,
-      "recall": 0.9992333248147202,
-      "f1-score": 0.9991056598952345,
+      "precision": 0.9993609406952966,
+      "recall": 0.9991055456171736,
+      "f1-score": 0.9992332268370607,
       "support": 23478.0
     },
-    "accuracy": 0.9991080151212675,
+    "accuracy": 0.999235441532515,
     "macro avg": {
-      "precision": 0.9991076901799848,
-      "recall": 0.9991083601369433,
-      "f1-score": 0.9991080089351199,
+      "precision": 0.9992358188697115,
+      "recall": 0.9992350838895763,
+      "f1-score": 0.9992354351541621,
       "support": 47086.0
     },
     "weighted avg": {
-      "precision": 0.9991080481661435,
-      "recall": 0.9991080151212675,
-      "f1-score": 0.9991080154205971,
+      "precision": 0.9992354734201655,
+      "recall": 0.999235441532515,
+      "f1-score": 0.9992354412511172,
       "support": 47086.0
     }
   },
-  "roc_auc": 0.9999900084548173,
-  "model_path": "D:\\Earthquake_Prediction\\models/checkpoints/multitask_model.pth",
+  "roc_auc": 0.9999925965500801,
+  "model_path": "D:\\Earthquake_Prediction\\models/checkpoints/multitask_model_improved.pth",
+  "model_arch": "improved",
   "num_test_samples": 47086,
-  "inference_time_sec": 1026.56
+  "inference_time_sec": 1791.3,
+  "location_status": "unavailable",
+  "location_metrics": {
+    "status": "unavailable",
+    "output_present": false,
+    "message": "Location output is unavailable for this model architecture/checkpoint."
+  }
 }

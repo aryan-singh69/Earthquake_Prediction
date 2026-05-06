@@ -1,11 +1,14 @@
 {
-  "accuracy": 0.9991080151212675,
-  "precision": 0.9989780275932549,
-  "recall": 0.9992333248147202,
-  "f1": 0.9991056598952345,
-  "roc_auc": 0.9999900084548173,
-  "p_wave_mae_sec": 6.618384398376507,
-  "magnitude_mae": 1.378167368035593,
-  "false_positives": 24,
-  "false_negatives": 18
+  "accuracy": 0.999235441532515,
+  "precision": 0.9993609406952966,
+  "recall": 0.9991055456171736,
+  "f1": 0.9992332268370607,
+  "roc_auc": 0.9999925965500801,
+  "model_arch": "improved",
+  "location_status": "unavailable",
+  "p_wave_mae_sec": 0.4526910519368381,
+  "s_wave_mae_sec": 0.5885411648928424,
+  "magnitude_mae": 1.3739785054472162,
+  "false_positives": 15,
+  "false_negatives": 21
 }
