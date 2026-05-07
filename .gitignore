@@ -12,10 +12,6 @@ venv/
 # VS Code
 .vscode/
 
-# Model Weights
-*.pth
-*.pt
-*.ckpt
 
 # Large Datasets
 *.npy
@@ -34,7 +30,6 @@ data/raw/
 data/processed/
 
 # Model artifacts
-models/checkpoints/
 models/exported/
 
 # User Uploads
