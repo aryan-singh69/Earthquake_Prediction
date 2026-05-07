@@ -1,14 +1,16 @@
 import os
 import sys
-import tempfile
+import io
+import traceback
+import logging
 import json
 import numpy as np
 import pandas as pd
 import h5py
 from flask import Flask, render_template, request, jsonify, send_from_directory
+from werkzeug.utils import secure_filename
 
 PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
-UPLOAD_FOLDER = os.path.join(PROJECT_ROOT, 'uploads')
 SAMPLE_FOLDER = os.path.join(PROJECT_ROOT, 'data', 'samples')
 NOTEBOOKS_FOLDER = os.path.join(PROJECT_ROOT, 'notebooks')
 MULTITASK_MODEL_PATH = os.path.join(PROJECT_ROOT, 'models', 'checkpoints', 'multitask_model.pth')
@@ -17,33 +19,45 @@ SAMPLE_FILES = {
     'noise': 'noise_demo.npy',
 }
 
-tempfile.tempdir = UPLOAD_FOLDER
+# Set up structured logging for production
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-# Model + predictor import
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 from inference.predictor import Predictor
 from inference.postprocess import resolve_threshold
 
 app = Flask(__name__)
 
+# Security: Limit upload size to ~5MB to prevent memory DoS
+app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024
+ALLOWED_EXTENSIONS = {'.npy', '.csv', '.hdf5', '.h5'}
+
+os.makedirs(SAMPLE_FOLDER, exist_ok=True)
+os.makedirs(NOTEBOOKS_FOLDER, exist_ok=True)
+
+# Instantiate predictor at startup
+try:
+    predictor = Predictor(model_path=MULTITASK_MODEL_PATH)
+except Exception as e:
+    logger.error(f"Failed to load predictor: {e}")
+    predictor = None
+
+
 def validate_waveform_shape(data: np.ndarray) -> np.ndarray:
     """Ensure input is (3, 6000) or (6000, 3), return (3, 6000)."""
     if data.ndim != 2:
         raise ValueError("Waveform must be 2D with shape (3, 6000) or (6000, 3)")
     if data.shape not in [(3, 6000), (6000, 3)]:
-        raise ValueError("Invalid shape; expected (3, 6000) or (6000, 3)")
+        raise ValueError(f"Invalid shape {data.shape}; expected (3, 6000) or (6000, 3)")
     if data.shape == (6000, 3):
         data = data.T
+    
+    # ML Safety: Check for NaNs
+    if np.isnan(data).any():
+        raise ValueError("Waveform contains NaN values.")
+        
     return data
-
-app.config['UPLOAD_FOLDER']      = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024
-
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(SAMPLE_FOLDER, exist_ok=True)
-os.makedirs(NOTEBOOKS_FOLDER, exist_ok=True)
-
-predictor = Predictor(model_path=MULTITASK_MODEL_PATH)
 
 
 def format_percent(value):
@@ -70,7 +84,10 @@ def load_json_file(path):
 def get_dashboard_context():
     final_summary = load_json_file(os.path.join(PROJECT_ROOT, "models", "metrics", "final_summary.json"))
     multitask_metrics = load_json_file(os.path.join(PROJECT_ROOT, "models", "metrics", "multitask_metrics.json"))
-    threshold_used, _ = resolve_threshold(predictor.recommended_threshold)
+    
+    threshold_used = "N/A"
+    if predictor:
+        threshold_used, _ = resolve_threshold(predictor.recommended_threshold)
 
     return {
         "evaluation": {
@@ -104,7 +121,6 @@ def prepare_waveform_for_plot(data: np.ndarray) -> dict:
     step = int(os.getenv("VIS_DOWNSAMPLE", "5"))
     step = max(1, step)
     x = np.arange(0, data.shape[1], step)
-    # Display normalization only (per-channel max-abs scaling)
     display = data.astype(np.float32).copy()
     for i in range(display.shape[0]):
         max_abs = float(np.max(np.abs(display[i])))
@@ -122,6 +138,10 @@ def prepare_waveform_for_plot(data: np.ndarray) -> dict:
 def build_prediction_payload(data: np.ndarray, file_type: str, filename: str | None = None) -> dict:
     data = validate_waveform_shape(data)
     plot_payload = prepare_waveform_for_plot(data)
+    
+    if not predictor:
+        raise RuntimeError("Inference model is not loaded.")
+        
     result = predictor.predict(data)
     p_sec = result.get("p_arrival_sec")
     s_sec = result.get("s_arrival_sec")
@@ -161,48 +181,63 @@ def build_prediction_payload(data: np.ndarray, file_type: str, filename: str | N
     return payload
 
 
-# Routes
+@app.route('/health')
+def health():
+    """Health check endpoint for deployment orchestration."""
+    status = "ok" if predictor else "degraded"
+    return jsonify({"status": status, "model_loaded": predictor is not None}), 200
+
+
 @app.route('/')
 def index():
     return render_dashboard()
+
 
 @app.route('/upload')
 def upload():
     return render_dashboard()
 
+
 @app.route('/dashboard')
 def dashboard():
     return render_dashboard()
 
+
 @app.route('/predict', methods=['POST'])
 def predict():
-    if not os.path.exists(MULTITASK_MODEL_PATH):
-        return jsonify({"status": "error", "message": "Model not found"}), 500
+    if not predictor:
+        return jsonify({"status": "error", "message": "Model is not loaded or unavailable."}), 503
+        
     if 'file' not in request.files:
-        return jsonify({"status": "error", "message": "No file part"}), 400
+        return jsonify({"status": "error", "message": "No file part in the request."}), 400
 
     file = request.files['file']
     if file.filename == '':
-        return jsonify({"status": "error", "message": "No selected file"}), 400
+        return jsonify({"status": "error", "message": "No selected file."}), 400
 
-    fname    = file.filename
-    filepath = os.path.join(UPLOAD_FOLDER, fname)
-    file.save(filepath)
-    print(f"File saved: {filepath}")
+    # Security: Secure filename to prevent path traversal
+    fname = secure_filename(file.filename)
+    if not fname or not any(fname.endswith(ext) for ext in ALLOWED_EXTENSIONS):
+        return jsonify({"status": "error", "message": "Invalid file or extension."}), 400
 
     try:
+        # Performance: Read file directly into memory, no disk I/O
+        file_bytes = file.read()
+        
         if fname.endswith('.npy'):
-            data = np.load(filepath, allow_pickle=True)
+            # Security: allow_pickle=False is CRITICAL to prevent RCE
+            data = np.load(io.BytesIO(file_bytes), allow_pickle=False)
         elif fname.endswith('.csv'):
-            data = pd.read_csv(filepath, header=None).values
+            data = pd.read_csv(io.BytesIO(file_bytes), header=None).values
         elif fname.endswith('.hdf5') or fname.endswith('.h5'):
-            with h5py.File(filepath, 'r') as f:
+            # h5py supports file-like objects
+            with h5py.File(io.BytesIO(file_bytes), 'r') as f:
                 first_key = list(f['data'].keys())[0]
-                data      = f['data'][first_key][()]
+                data = f['data'][first_key][()]
         else:
             return jsonify({"status": "error", "message": "Unsupported format. Use .npy, .csv, .hdf5"}), 400
 
-        print(f"Loaded shape: {data.shape}")
+        logger.info(f"Loaded shape from {fname}: {data.shape}")
         payload = build_prediction_payload(
             data,
             file_type=fname.split('.')[-1].upper(),
@@ -210,35 +245,33 @@ def predict():
         )
         return jsonify(payload)
 
+    except ValueError as ve:
+        # Catch validation errors (e.g. shape mismatch, NaN)
+        return jsonify({"status": "error", "message": str(ve)}), 400
     except Exception as e:
-        print(f"Error: {str(e)}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+        # Security: Do not leak stack traces to the client
+        logger.error(f"Inference error on {fname}: {traceback.format_exc()}")
+        return jsonify({"status": "error", "message": "An internal error occurred during prediction."}), 500
 
 
 @app.route('/sample/<sample_type>')
 @app.route('/load-sample/<sample_type>')
 def load_sample(sample_type):
-    if not os.path.exists(MULTITASK_MODEL_PATH):
-        return jsonify({"status": "error", "message": "Model not found"}), 500
+    if not predictor:
+        return jsonify({"status": "error", "message": "Model is not loaded."}), 503
 
     if sample_type not in SAMPLE_FILES:
-        return jsonify({
-            "status": "error",
-            "message": "Unknown sample type. Use earthquake or noise.",
-        }), 400
+        return jsonify({"status": "error", "message": "Unknown sample type."}), 400
 
     sample_filename = SAMPLE_FILES[sample_type]
     sample_path = os.path.join(SAMPLE_FOLDER, sample_filename)
-    rel_sample_path = os.path.relpath(sample_path, PROJECT_ROOT)
 
     try:
         if not os.path.exists(sample_path):
-            return jsonify({
-                "status": "error",
-                "message": f"Demo sample missing: {rel_sample_path}",
-            }), 404
+            return jsonify({"status": "error", "message": "Demo sample missing."}), 404
 
-        data = np.load(sample_path, allow_pickle=True)
+        # Security: allow_pickle=False for local samples too
+        data = np.load(sample_path, allow_pickle=False)
         payload = build_prediction_payload(
             data,
             file_type="NPY (Sample)",
@@ -248,13 +281,17 @@ def load_sample(sample_type):
         return jsonify(payload)
 
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        logger.error(f"Error loading sample {sample_type}: {traceback.format_exc()}")
+        return jsonify({"status": "error", "message": "An internal error occurred."}), 500
 
 
 @app.route('/notebooks/<path:filename>')
 def serve_notebooks(filename):
+    # Security: send_from_directory prevents path traversal
     return send_from_directory(NOTEBOOKS_FOLDER, filename)
 
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    # Deployment: Support PORT environment variable, remove debug=True
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)

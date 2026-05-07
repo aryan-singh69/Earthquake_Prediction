@@ -60,6 +60,10 @@ class Predictor:
             os.path.join(PROJECT_ROOT, "models", "metrics"),
         )
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        # Deployment: Optimize PyTorch CPU threads to prevent server throttling
+        if self.device.type == "cpu":
+            torch.set_num_threads(1)
 
         self.model = MultiTaskCNN().to(self.device)
         if os.path.exists(self.model_path):

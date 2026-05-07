@@ -49,3 +49,8 @@ Thumbs.db
 
 # Jupyter
 .ipynb_checkpoints/
+
+seismic_env/
+venv/
+__pycache__/
+*.pyc
