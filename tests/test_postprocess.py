@@ -86,6 +86,22 @@ def test_load_threshold_analysis_falls_back_to_best_f1(monkeypatch, tmp_path):
     assert summary["f1"] == 0.86
 
 
+def test_load_threshold_analysis_skips_invalid_rows(monkeypatch, tmp_path):
+    csv_path = tmp_path / "threshold_analysis.csv"
+    csv_path.write_text(
+        "threshold,accuracy,precision,recall,f1\n"
+        "bad,row,that,should,skip\n"
+        "0.45,0.91,0.8,0.89,0.84\n"
+    )
+    monkeypatch.setenv("PRECISION_ACCEPTABLE_MIN", "0.9")
+    monkeypatch.setenv("RECALL_PREFERRED_MIN", "0.95")
+
+    recommended, summary = load_threshold_analysis(str(csv_path))
+
+    assert recommended == 0.45
+    assert summary["basis"] == "best_f1"
+
+
 def test_resolve_threshold_override(monkeypatch):
     monkeypatch.setenv("DETECTION_THRESHOLD", "0.73")
     threshold, thresholds = resolve_threshold(recommended=0.41)
@@ -101,6 +117,7 @@ def test_resolve_threshold_override(monkeypatch):
         ("low", 0.42, 0.3),
         ("auto", 0.42, 0.42),
         ("unknown", 0.42, 0.5),
+        ("unknown", None, 0.5),
         ("auto", None, 0.5),
     ],
 )
