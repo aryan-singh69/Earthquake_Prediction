@@ -12,6 +12,8 @@ from src.inference.postprocess import (
     validate_phase,
 )
 
+FLOAT_TOL = 1e-7
+
 
 def test_energy_and_variance_basic():
     wave = np.ones((3, 6000), dtype=float)
@@ -24,8 +26,8 @@ def test_energy_and_variance_basic():
 def test_normalize_waveform_channelwise():
     wave = np.array([[1.0, 2.0, 3.0], [10.0, 11.0, 12.0], [0.0, 0.0, 0.0]])
     normalized = normalize_waveform(wave)
-    assert np.allclose(normalized.mean(axis=1), 0.0, atol=1e-7)
-    assert np.allclose(normalized.std(axis=1)[:2], 1.0, atol=1e-7)
+    assert np.allclose(normalized.mean(axis=1), 0.0, atol=FLOAT_TOL)
+    assert np.allclose(normalized.std(axis=1)[:2], 1.0, atol=FLOAT_TOL)
     assert np.allclose(normalized[2], 0.0)
 
 
@@ -148,8 +150,9 @@ def test_threshold_logic_earthquake():
 
 def test_high_confidence_can_be_filtered_to_noise():
     wave = np.full((3, 6000), 0.01, dtype=float)
+    prob = 0.92
     result = postprocess_prediction(
-        prob=0.92,
+        prob=prob,
         waveform=wave,
         threshold_used=0.6,
         strict_threshold=0.8,
@@ -163,7 +166,7 @@ def test_high_confidence_can_be_filtered_to_noise():
     assert result["prediction"] == "Noise"
     assert result["decision_reason"] == "low_energy_filtered"
     assert result["alert"] is False
-    assert result["confidence"] == 8.0
+    assert result["confidence"] == round((1.0 - prob) * 100.0, 2)
 
 
 def test_possible_event_classification():
@@ -187,8 +190,9 @@ def test_possible_event_classification():
 
 def test_below_weak_threshold_remains_noise():
     wave = np.ones((3, 6000), dtype=float)
+    prob = 0.1
     result = postprocess_prediction(
-        prob=0.1,
+        prob=prob,
         waveform=wave,
         threshold_used=0.6,
         strict_threshold=0.8,
@@ -202,7 +206,7 @@ def test_below_weak_threshold_remains_noise():
     assert result["prediction"] == "Noise"
     assert result["decision_reason"] == "below_threshold"
     assert result["alert"] is False
-    assert result["confidence"] == 90.0
+    assert result["confidence"] == round((1.0 - prob) * 100.0, 2)
 
 
 def test_validate_phase_states():
