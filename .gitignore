@@ -37,6 +37,8 @@ uploads/
 
 # Logs
 *.log
+.coverage
+.coverage.*
 
 # OS Files
 .DS_Store
