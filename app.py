@@ -291,7 +291,13 @@ def serve_notebooks(filename):
     return send_from_directory(NOTEBOOKS_FOLDER, filename)
 
 
-if __name__ == '__main__':
-    # Deployment: Support PORT environment variable, remove debug=True
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+if __name__ == "__main__":
+    import os
+
+    port = 8080
+
+    app.run(
+        host="0.0.0.0",
+        port=port,
+        debug=False
+    )
