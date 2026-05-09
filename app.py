@@ -23,9 +23,17 @@ SAMPLE_FILES = {
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
-from inference.predictor import Predictor
-from inference.postprocess import resolve_threshold
+sys.path.insert(0, os.path.join(PROJECT_ROOT, 'src'))
+
+try:
+    from inference.predictor import Predictor
+    from inference.postprocess import resolve_threshold
+    INFERENCE_AVAILABLE = True
+except Exception as e:
+    logger.error(f"Failed to import inference modules: {e}")
+    Predictor = None
+    resolve_threshold = None
+    INFERENCE_AVAILABLE = False
 
 app = Flask(__name__)
 
@@ -38,7 +46,10 @@ os.makedirs(NOTEBOOKS_FOLDER, exist_ok=True)
 
 # Instantiate predictor at startup
 try:
-    predictor = Predictor(model_path=MULTITASK_MODEL_PATH)
+    if INFERENCE_AVAILABLE:
+        predictor = Predictor(model_path=MULTITASK_MODEL_PATH)
+    else:
+        predictor = None
 except Exception as e:
     logger.error(f"Failed to load predictor: {e}")
     predictor = None
