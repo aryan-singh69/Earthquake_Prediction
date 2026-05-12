@@ -21,8 +21,6 @@ This project implements a **complete AI inference and alert pipeline**, not just
 
 For a complete technical breakdown of the system architecture, training pipeline, and design decisions:
 
-👉 [Project Walkthrough](./WALKTHROUGH.md)
-
 ---
 
 ## 🛠️ Tech Stack
@@ -193,12 +191,7 @@ Take immediate action:
 ---
 
 ## 🎥 Demo
-
-- Waveform visualization
-- Alert popup system
-- Prediction output
-
-*(Screenshots / demo video coming soon)*
+https://earthquake-prediction-42ti.onrender.com/
 
 ---
 

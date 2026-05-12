@@ -1,9 +1,6 @@
 """
 Manual training entrypoint for MultiTaskCNNImproved.
 
-Usage:
-  python scripts/train_improved_multitask.py
-
 Notes:
 - This script does not auto-run unless executed directly.
 - It saves to models/checkpoints/multitask_model_improved.pth by default.
